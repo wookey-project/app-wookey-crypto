@@ -280,13 +280,25 @@ int _main(uint32_t task_id)
      *     SDIO DMA will then read from it and write into the SDIO
      *     storage
      *******************************************/
+    struct dataplane_command dataplane_command_wr = { 0 };
+    struct dataplane_command dataplane_command_ack = { DATA_WR_DMA_ACK, 0, 0 };
+    uint8_t sinker = 0;
+    logsize_t ipcsize = sizeof(struct dataplane_command);
 
 
     // hide your children !!
     while (1) {
         // wait for sdio & usb and react to buffers reception and IPCs from
         // sdio & usb with DMA activation
-        sys_yield();
+        do {
+           sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_wr);
+        } while ((sinker != id_usb) || (ipcsize != sizeof(struct dataplane_command)));
+        printf("received request to launch DMA: write %d block at sector %d\n",
+                dataplane_command_wr.num_sectors,
+                dataplane_command_wr.sector_address);
+        sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
+        // receiving ipc from USB
+
     }
 #if 0
     while (1) {
