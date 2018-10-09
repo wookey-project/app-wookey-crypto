@@ -23,6 +23,8 @@
 const char *tim = "tim";
 #endif
 
+volatile uint32_t numipc = 0;
+
 uint32_t num_dma_in_it = 0;
 uint32_t num_dma_out_it = 0;
 
@@ -283,19 +285,25 @@ int _main(uint32_t task_id)
     struct dataplane_command dataplane_command_wr = { 0 };
     struct dataplane_command dataplane_command_ack = { DATA_WR_DMA_ACK, 0, 0 };
     uint8_t sinker = 0;
-    logsize_t ipcsize = sizeof(struct dataplane_command);
+    logsize_t ipcsize = 0;
 
 
     // hide your children !!
     while (1) {
+        sinker = id_usb;
+        ipcsize = sizeof(struct dataplane_command);
         // wait for sdio & usb and react to buffers reception and IPCs from
         // sdio & usb with DMA activation
-        do {
+        //do {
            sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_wr);
-        } while ((sinker != id_usb) || (ipcsize != sizeof(struct dataplane_command)));
-        printf("received request to launch DMA: write %d block at sector %d\n",
-                dataplane_command_wr.num_sectors,
-                dataplane_command_wr.sector_address);
+           //numipc++;
+        //} while ((sinker != id_usb) || (ipcsize != sizeof(struct dataplane_command)));
+        //
+        // start DMA transfer to SDIO
+        //cryp_do_dma(bufin, bufout, size, dma_in_desc, dma_out_desc);
+        //printf("received request to launch DMA: write %d block at sector %d\n",
+        //        dataplane_command_wr.num_sectors,
+        //        dataplane_command_wr.sector_address);
         sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
         // receiving ipc from USB
 
