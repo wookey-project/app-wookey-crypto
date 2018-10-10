@@ -17,7 +17,7 @@
 #include "ipc_proto.h"
 
 #define CRYPTO_MODE CRYP_PRODMODE
-#define CRYPTO_DEBUG 1
+#define CRYPTO_DEBUG 0
 
 #ifdef CONFIG_APP_CRYPTO_USE_GETCYCLES
 const char *tim = "tim";
@@ -33,6 +33,16 @@ bool usb_ready = false;
 bool smart_ready = false;
 
 status_reg_t status_reg = { 0 };
+
+enum shms {
+    ID_USB = 0,
+    ID_SDIO = 1
+};
+
+volatile struct {
+    uint32_t address;
+    uint16_t size;
+} shms_tab[2] = { 0 };
 
 uint32_t td_dma = 0;
 
@@ -69,9 +79,6 @@ uint8_t id_benchlog = 0;
 
 uint32_t dma_in_desc;
 uint32_t dma_out_desc;
-
-uint8_t buf_in[512] = { 0 };
-uint8_t buf_out[512] = { 0 };
 
 uint8_t master_key_hash[32] = {0};
 
@@ -192,14 +199,12 @@ int _main(uint32_t task_id)
 
     do {
       ret = sys_ipc(IPC_SEND_SYNC, id_smart, size, (char*)&ipc_sync_cmd);
-    } while (ret != SYS_E_DONE);
+    } while (ret == SYS_E_BUSY);
 
     id = id_smart;
     size = 3 + 32;
 
-    do {
-        ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-    } while (ret != SYS_E_DONE);
+    ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
 
     if (   ipc_sync_cmd.magic == MAGIC_CRYPTO_INJECT_RESP
         && ipc_sync_cmd.state == SYNC_DONE) {
@@ -213,34 +218,24 @@ int _main(uint32_t task_id)
     } else {
         goto err;
     }
+    cryp_init_dma(my_cryptin_handler, my_cryptout_handler, dma_in_desc, dma_out_desc);
 
     /*******************************************
      * cryptography initialization done.
      * Let start 2nd pase (SDIO/Crypto/USB runtime)
      *******************************************/
 
+    size = 2;
 
     printf("sending end_of_cryp syncrhonization to sdio\n");
     ipc_sync_cmd.magic = MAGIC_TASK_STATE_CMD;
     ipc_sync_cmd.state = SYNC_READY;
 
     /* First inform SDIO block that everything is ready... */
-    size = 2;
     do {
       ret = sys_ipc(IPC_SEND_SYNC, id_sdio, size, (char*)&ipc_sync_cmd);
-    } while (ret != SYS_E_DONE);
-
-    id = id_sdio;
-    size = 2;
-
-    do {
-        ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-    } while (ret != SYS_E_DONE);
-
-    if (   ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
-        && ipc_sync_cmd.state == SYNC_READY) {
-        printf("SDIO module is ready\n");
-    }
+    } while (ret == SYS_E_BUSY);
+    printf("sending end_of_cryp to sdio done.\n");
 
 
     printf("sending end_of_cryp syncrhonization to usb\n");
@@ -248,21 +243,67 @@ int _main(uint32_t task_id)
     ipc_sync_cmd.state = SYNC_READY;
 
     /* First inform SDIO block that everything is ready... */
-    size = 2;
     do {
       ret = sys_ipc(IPC_SEND_SYNC, id_usb, size, (char*)&ipc_sync_cmd);
-    } while (ret != SYS_E_DONE);
+    } while (ret == SYS_E_BUSY);
+    printf("sending end_of_cryp to usb done.\n");
 
-    id = id_usb;
-    size = 2;
 
-    do {
+    printf("waiting for end_of_cryp response from USB & SDIO\n");
+    for (uint8_t i = 0; i < 2; ++i) {
+        id = ANY_APP;
+        size = 2;
+
         ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-    } while (ret != SYS_E_DONE);
+        if (ret == SYS_E_DONE) {
+            if (id == id_usb) {
+                if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
+                        && ipc_sync_cmd.state == SYNC_READY) {
+                    printf("USB module is ready\n");
+                }
+            } else if (id == id_sdio) {
+                if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
+                        && ipc_sync_cmd.state == SYNC_READY) {
+                    printf("SDIO module is ready\n");
+                }
+            } else {
+                    printf("received msg from id %d ??\n", id);
+            }
+        }
+    }
 
-    if (   ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
-        && ipc_sync_cmd.state == SYNC_READY) {
-        printf("USB module is ready\n");
+
+    /*******************************************
+     * Syncrhonizing DMA SHM buffer address with USB and SDIO, through IPC
+     ******************************************/
+    struct dmashm_info {
+        uint32_t addr;
+        uint16_t size;
+    };
+
+    struct dmashm_info shm_info;
+
+    // 2 receptions are waited: one from usb, one from sdio, in whatever order
+    for (uint8_t i = 0; i < 2; ++i) {
+        id = ANY_APP;
+        size = sizeof(struct dmashm_info);
+
+        ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&shm_info);
+        if (ret == SYS_E_DONE) {
+            if (id == id_usb) {
+                    shms_tab[ID_USB].address = shm_info.addr;
+                    shms_tab[ID_USB].size = shm_info.size;
+                    printf("received DMA SHM info from USB: @: %x, size: %d\n",
+                            shms_tab[ID_USB].address, shms_tab[ID_USB].size);
+            } else if (id == id_sdio) {
+                    shms_tab[ID_SDIO].address = shm_info.addr;
+                    shms_tab[ID_SDIO].size = shm_info.size;
+                    printf("received DMA SHM info from SDIO: @: %x, size: %d\n",
+                            shms_tab[ID_SDIO].address, shms_tab[ID_SDIO].size);
+            } else {
+                    printf("received msg from id %d ??\n", id);
+            }
+        }
     }
 
 
@@ -300,10 +341,34 @@ int _main(uint32_t task_id)
         //} while ((sinker != id_usb) || (ipcsize != sizeof(struct dataplane_command)));
         //
         // start DMA transfer to SDIO
-        //cryp_do_dma(bufin, bufout, size, dma_in_desc, dma_out_desc);
-        //printf("received request to launch DMA: write %d block at sector %d\n",
-        //        dataplane_command_wr.num_sectors,
-        //        dataplane_command_wr.sector_address);
+        cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
+
+        // wait for DMA crypto to return
+        do {
+          sys_yield();
+        } while (status_reg.dmaout_done == true);
+
+#if CRYPTO_DEBUG
+        printf("CRYP DMA has finished !\n");
+#endif
+        status_reg.dmaout_done = false;
+        // request DMA transfer to SDIO block device (IPC)
+        
+        
+        sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_wr);
+        
+        // wait for SDIO task acknowledge (IPC)
+        sinker = id_sdio;
+        ipcsize = sizeof(struct dataplane_command);
+        //do {
+        ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
+        //} while (ret != SYS_E_DONE && sinker != id_sdio);
+
+#if CRYPTO_DEBUG
+        printf("received ipc from %d\n", sinker);
+#endif
+        
+        // acknowledge to USB: data has been written to disk (IPC)
         sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
         // receiving ipc from USB
 
