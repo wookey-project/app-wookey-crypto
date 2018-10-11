@@ -328,6 +328,8 @@ int _main(uint32_t task_id)
     uint8_t sinker = 0;
     logsize_t ipcsize = 0;
 
+    // Default mode is encryption
+    cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
 
     // hide your children !!
     while (1) {
@@ -347,13 +349,9 @@ int _main(uint32_t task_id)
            //write plane, first exec DMA, then ask SDIO for writing
            //cryp_init(0, 0, AES_CBC_ESSIV_h_key, AES_CBC, ENCRYPT);
            //
-           if (cryp_dir_switched(ENCRYPT) || true) {
-               // when switching from encrypt to decrypt, the key must be
-               // injected again
-               // FIXME: Seems that key req is needed not only for the first one in
-               // write mode (write only)
-               //
-               //printf("switched!!!\n");
+           if (cryp_get_dir() == DECRYPT) {
+	 	//printf("===> Asking for reinjection!\n");
+	       /* When switching from DECRYPT to ENCRYPT, we have to inject the key again */
                id = id_smart;
                size = sizeof (struct sync_command);
                ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
@@ -363,19 +361,18 @@ int _main(uint32_t task_id)
                sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
 
                sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-
            }
 
-           //cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
-           cryp_init(0, KEY_256, 0, AES_ECB, ENCRYPT);
+           cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
+           //cryp_init(0, KEY_256, 0, AES_ECB, ENCRYPT);
            cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
            // wait for DMA crypto to return
            do {
                sys_yield();
            } while (status_reg.dmaout_done == true);
 
-#if CRYPTO_DEBUG
-           printf("[write] CRYP DMA has finished !\n");
+#if 1
+           printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
 #endif
            status_reg.dmaout_done = false;
            // request DMA transfer to SDIO block device (IPC)
@@ -416,7 +413,11 @@ int _main(uint32_t task_id)
            printf("[read] received ipc from sdio (%d): data loaded\n", sinker);
 #endif
 
-           if (cryp_dir_switched(DECRYPT) || true) {
+           if (cryp_get_dir() == ENCRYPT) {
+	       /* When switching from ENCRYPT to DECRYPT, we only have to prepare the key!
+		* We only have to do the key preparation once when multiple decryptions are done.
+		*/
+#if 0
                // when switching from encrypt to decrypt, the key must be
                // injected again
                id = id_smart;
@@ -428,20 +429,21 @@ int _main(uint32_t task_id)
                sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
 
                sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-
+#endif
+		//printf("===> PREPARING THE KEY !\n");
+		cryp_set_mode(AES_KEY_PREPARE);
            }
 
+           cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
            // read plane, uncypher, from sdio to usb
-           //cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
-
-           cryp_init(0, KEY_256, 0, AES_ECB, DECRYPT);
+           //cryp_init(0, KEY_256, 0, AES_ECB, DECRYPT);
            cryp_do_dma((const uint8_t *)shms_tab[ID_SDIO].address, (const uint8_t *)shms_tab[ID_USB].address, shms_tab[ID_SDIO].size, dma_in_desc, dma_out_desc);
            // wait for DMA crypto to return
            do {
                sys_yield();
            } while (status_reg.dmaout_done == true);
 
-#if CRYPTO_DEBUG
+#if 1
            printf("[read] CRYP DMA has finished !\n");
 #endif
 #endif
