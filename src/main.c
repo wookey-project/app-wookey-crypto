@@ -323,7 +323,7 @@ int _main(uint32_t task_id)
      *     SDIO DMA will then read from it and write into the SDIO
      *     storage
      *******************************************/
-    struct dataplane_command dataplane_command_wr = { 0 };
+    struct dataplane_command dataplane_command_rw = { 0 };
     struct dataplane_command dataplane_command_ack = { DATA_WR_DMA_ACK, 0, 0 };
     uint8_t sinker = 0;
     logsize_t ipcsize = 0;
@@ -331,93 +331,132 @@ int _main(uint32_t task_id)
 
     // hide your children !!
     while (1) {
+	    //unsigned char tonpere[32] = { 0 }; // "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
         sinker = id_usb;
         ipcsize = sizeof(struct dataplane_command);
-        // wait for sdio & usb and react to buffers reception and IPCs from
-        // sdio & usb with DMA activation
-        //do {
-           sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_wr);
-           //numipc++;
-        //} while ((sinker != id_usb) || (ipcsize != sizeof(struct dataplane_command)));
-        //
+        // wait for read or write request from USB
+
+        sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_rw);
+
         // start DMA transfer to SDIO
-        cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
+        if (dataplane_command_rw.magic == DATA_WR_DMA_REQ) {
+           /***************************************************
+            * Write mode automaton
+            **************************************************/
 
-        // wait for DMA crypto to return
-        do {
-          sys_yield();
-        } while (status_reg.dmaout_done == true);
+           //write plane, first exec DMA, then ask SDIO for writing
+           //cryp_init(0, 0, AES_CBC_ESSIV_h_key, AES_CBC, ENCRYPT);
+           //
+           if (cryp_dir_switched(ENCRYPT) || true) {
+               // when switching from encrypt to decrypt, the key must be
+               // injected again
+               // FIXME: Seems that key req is needed not only for the first one in
+               // write mode (write only)
+               //
+               //printf("switched!!!\n");
+               id = id_smart;
+               size = sizeof (struct sync_command);
+               ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
+               ipc_sync_cmd.data[0] = ENCRYPT;
+               ipc_sync_cmd.data_size = (uint8_t)1;
+
+               sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+
+               sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+
+           }
+
+           //cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
+           cryp_init(0, KEY_256, 0, AES_ECB, ENCRYPT);
+           cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
+           // wait for DMA crypto to return
+           do {
+               sys_yield();
+           } while (status_reg.dmaout_done == true);
 
 #if CRYPTO_DEBUG
-        printf("CRYP DMA has finished !\n");
+           printf("[write] CRYP DMA has finished !\n");
 #endif
-        status_reg.dmaout_done = false;
-        // request DMA transfer to SDIO block device (IPC)
-        
-        
-        sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_wr);
-        
-        // wait for SDIO task acknowledge (IPC)
-        sinker = id_sdio;
-        ipcsize = sizeof(struct dataplane_command);
-        //do {
-        ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
-        //} while (ret != SYS_E_DONE && sinker != id_sdio);
+           status_reg.dmaout_done = false;
+           // request DMA transfer to SDIO block device (IPC)
+
+
+           sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
+
+           // wait for SDIO task acknowledge (IPC)
+           sinker = id_sdio;
+           ipcsize = sizeof(struct dataplane_command);
+
+           ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
 
 #if CRYPTO_DEBUG
-        printf("received ipc from %d\n", sinker);
+           printf("[write] received ipc from sdio (%d)\n", sinker);
 #endif
-        
+           // set ack magic for write ack
+           dataplane_command_ack.magic = DATA_WR_DMA_ACK;
+
+
+
+        } else if (dataplane_command_rw.magic == DATA_RD_DMA_REQ) {
+           /***************************************************
+            * Read mode automaton
+            **************************************************/
+
+#if 1
+           // first ask SDIO to load data to its own buffer from the SDCard
+           sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
+
+           // wait for SDIO task acknowledge (IPC)
+           sinker = id_sdio;
+           ipcsize = sizeof(struct dataplane_command);
+
+           ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
+
+#if CRYPTO_DEBUG
+           printf("[read] received ipc from sdio (%d): data loaded\n", sinker);
+#endif
+
+           if (cryp_dir_switched(DECRYPT) || true) {
+               // when switching from encrypt to decrypt, the key must be
+               // injected again
+               id = id_smart;
+               size = sizeof (struct sync_command);
+               ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
+               ipc_sync_cmd.data[0] = DECRYPT;
+               ipc_sync_cmd.data_size = (uint8_t)0;
+
+               sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+
+               sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+
+           }
+
+           // read plane, uncypher, from sdio to usb
+           //cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
+
+           cryp_init(0, KEY_256, 0, AES_ECB, DECRYPT);
+           cryp_do_dma((const uint8_t *)shms_tab[ID_SDIO].address, (const uint8_t *)shms_tab[ID_USB].address, shms_tab[ID_SDIO].size, dma_in_desc, dma_out_desc);
+           // wait for DMA crypto to return
+           do {
+               sys_yield();
+           } while (status_reg.dmaout_done == true);
+
+#if CRYPTO_DEBUG
+           printf("[read] CRYP DMA has finished !\n");
+#endif
+#endif
+           // set ack magic for read ack
+           dataplane_command_ack.magic = DATA_RD_DMA_ACK;
+
+        } else {
+            printf("invalid request from USB !\n");
+        }
+
         // acknowledge to USB: data has been written to disk (IPC)
         sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
         // receiving ipc from USB
 
     }
-#if 0
-    while (1) {
-        //sys_yield();
-        // avoiding sys_yield() here, there is a possible race condition between
-        // yielding and the IRQ that can be faster (and make yielding being executed
-        // just after, making the main thread sleeping for ever
-        if (status_reg.dmain_done == true) {
-            status_reg.dmain_done = false;
-            //ret = sys_ipc(IPC_DMA_RELOAD, 0, (uint32_t)&dma_in, 0);
-            //printf("cryp DMA in done\n");
-        }
-        if (status_reg.dmain_fifo_err == true) {
-            printf("DMA in FIFO error !\n");
-            status_reg.dmain_fifo_err = false;
-        }
-        if (status_reg.dmain_tr_err == true) {
-            printf("DMA in transfer error !\n");
-            status_reg.dmain_tr_err = false;
-        }
-        if (status_reg.dmain_dm_err == true) {
-            printf("DMA in direct mode error !\n");
-            status_reg.dmain_dm_err = false;
-        }
-
-        if (status_reg.dmaout_done == true) {
-            status_reg.dmaout_done = false;
-            //printf("reloading all DMAs\n");
-            td_dma++;
-            //ret = sys_ipc(IPC_DMA_RELOAD, 0, (uint32_t)&dma_in, 0);
-            //ret = sys_ipc(IPC_DMA_RELOAD, 0, (uint32_t)&dma_out, 0);
-        }
-        if (status_reg.dmaout_fifo_err == true) {
-            printf("DMA out FIFO error !\n");
-            status_reg.dmaout_fifo_err = false;
-        }
-        if (status_reg.dmaout_tr_err == true) {
-            printf("DMA out transfer error !\n");
-            status_reg.dmaout_tr_err = false;
-        }
-        if (status_reg.dmaout_dm_err == true) {
-            printf("DMA out direct mode error !\n");
-            status_reg.dmaout_dm_err = false;
-        }
-    }
-#endif
 
 err:
     while (1) {
