@@ -17,7 +17,7 @@
 #include "ipc_proto.h"
 
 #define CRYPTO_MODE CRYP_PRODMODE
-#define CRYPTO_DEBUG 0
+#define CRYPTO_DEBUG 1
 
 #ifdef CONFIG_APP_CRYPTO_USE_GETCYCLES
 const char *tim = "tim";
@@ -350,6 +350,8 @@ int _main(uint32_t task_id)
            //cryp_init(0, 0, AES_CBC_ESSIV_h_key, AES_CBC, ENCRYPT);
            //
            if (cryp_get_dir() == DECRYPT) {
+
+               cryp_wait_for_emtpy_fifos();
 	 	//printf("===> Asking for reinjection!\n");
 	       /* When switching from DECRYPT to ENCRYPT, we have to inject the key again */
                id = id_smart;
@@ -371,7 +373,7 @@ int _main(uint32_t task_id)
                sys_yield();
            } while (status_reg.dmaout_done == true);
 
-#if 1
+#if CRYPTO_DEBUG
            printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
 #endif
            status_reg.dmaout_done = false;
@@ -399,7 +401,6 @@ int _main(uint32_t task_id)
             * Read mode automaton
             **************************************************/
 
-#if 1
            // first ask SDIO to load data to its own buffer from the SDCard
            sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
 
@@ -414,24 +415,12 @@ int _main(uint32_t task_id)
 #endif
 
            if (cryp_get_dir() == ENCRYPT) {
+
+               cryp_wait_for_emtpy_fifos();
 	       /* When switching from ENCRYPT to DECRYPT, we only have to prepare the key!
 		* We only have to do the key preparation once when multiple decryptions are done.
 		*/
-#if 0
-               // when switching from encrypt to decrypt, the key must be
-               // injected again
-               id = id_smart;
-               size = sizeof (struct sync_command);
-               ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
-               ipc_sync_cmd.data[0] = DECRYPT;
-               ipc_sync_cmd.data_size = (uint8_t)0;
-
-               sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
-
-               sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-#endif
-		//printf("===> PREPARING THE KEY !\n");
-		cryp_set_mode(AES_KEY_PREPARE);
+		       cryp_set_mode(AES_KEY_PREPARE);
            }
 
            cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
@@ -443,9 +432,8 @@ int _main(uint32_t task_id)
                sys_yield();
            } while (status_reg.dmaout_done == true);
 
-#if 1
+#if CRYPTO_DEBUG
            printf("[read] CRYP DMA has finished !\n");
-#endif
 #endif
            // set ack magic for read ack
            dataplane_command_ack.magic = DATA_RD_DMA_ACK;
