@@ -17,7 +17,7 @@
 #include "ipc_proto.h"
 
 #define CRYPTO_MODE CRYP_PRODMODE
-#define CRYPTO_DEBUG 1
+#define CRYPTO_DEBUG 0
 
 #ifdef CONFIG_APP_CRYPTO_USE_GETCYCLES
 const char *tim = "tim";
