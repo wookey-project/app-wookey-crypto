@@ -332,7 +332,7 @@ int _main(uint32_t task_id)
     //logsize_t ipcsize = 0;
 
     // Default mode is encryption
-    cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
+    cryp_init_user(KEY_256, 0, AES_CBC, ENCRYPT);
 
     // hide your children !!
     while (1) {
@@ -430,8 +430,7 @@ int _main(uint32_t task_id)
                         sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
                     }
 
-                    cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
-                    //cryp_init(0, KEY_256, 0, AES_ECB, ENCRYPT);
+                    cryp_init_user(KEY_256, 0, AES_CBC, ENCRYPT);
                     cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
                     // wait for DMA crypto to return
                     do {
@@ -494,9 +493,8 @@ int _main(uint32_t task_id)
                         cryp_set_mode(AES_KEY_PREPARE);
                     }
 
-                    cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
+                    cryp_init_user(KEY_256, 0, AES_CBC, DECRYPT);
                     // read plane, uncypher, from sdio to usb
-                    //cryp_init(0, KEY_256, 0, AES_ECB, DECRYPT);
                     cryp_do_dma((const uint8_t *)shms_tab[ID_SDIO].address, (const uint8_t *)shms_tab[ID_USB].address, shms_tab[ID_SDIO].size, dma_in_desc, dma_out_desc);
                     // wait for DMA crypto to return
                     do {
