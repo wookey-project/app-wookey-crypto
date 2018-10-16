@@ -323,128 +323,213 @@ int _main(uint32_t task_id)
      *     SDIO DMA will then read from it and write into the SDIO
      *     storage
      *******************************************/
+    t_ipc_command ipc_mainloop_cmd = { 0 };
+    logsize_t ipcsize = sizeof(ipc_mainloop_cmd);
+
     struct dataplane_command dataplane_command_rw = { 0 };
     struct dataplane_command dataplane_command_ack = { DATA_WR_DMA_ACK, 0, 0 };
     uint8_t sinker = 0;
-    logsize_t ipcsize = 0;
+    //logsize_t ipcsize = 0;
 
     // Default mode is encryption
     cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
 
     // hide your children !!
     while (1) {
-	    //unsigned char tonpere[32] = { 0 }; // "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
+        //unsigned char tonpere[32] = { 0 }; // "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
         sinker = id_usb;
-        ipcsize = sizeof(struct dataplane_command);
+        ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
 
-        sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_rw);
+        sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&ipc_mainloop_cmd);
 
-        // start DMA transfer to SDIO
-        if (dataplane_command_rw.magic == DATA_WR_DMA_REQ) {
-           /***************************************************
-            * Write mode automaton
-            **************************************************/
+        switch (ipc_mainloop_cmd.magic) {
 
-           //write plane, first exec DMA, then ask SDIO for writing
-           //cryp_init(0, 0, AES_CBC_ESSIV_h_key, AES_CBC, ENCRYPT);
-           //
-           if (cryp_get_dir() == DECRYPT) {
 
-               cryp_wait_for_emtpy_fifos();
-	 	//printf("===> Asking for reinjection!\n");
-	       /* When switching from DECRYPT to ENCRYPT, we have to inject the key again */
-               id = id_smart;
-               size = sizeof (struct sync_command);
-               ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
-               ipc_sync_cmd.data[0] = ENCRYPT;
-               ipc_sync_cmd.data_size = (uint8_t)1;
+            case MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD:
+                {
+                    /***************************************************
+                     * SDIO/USB block size synchronization
+                     **************************************************/
+                    /*
+                     * INFO: this line makes a copy of the structure. Not impacting here (init phase) but
+                     * should not be used in the dataplane, as it will impact the performances
+                     */
+                    ipc_sync_cmd = ipc_mainloop_cmd.sync_cmd;
+                    /*
+                     * By now, request is sent 'as is' to SDIO. Nevertheless, it would be possible
+                     * to clean the struct content to avoid any data leak before transfering the content
+                     * to sdio task, behavioring like a filter.
+                     */ 
+                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
 
-               sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+                    id = id_sdio;
+                    size = sizeof(struct sync_command);
 
-               sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-           }
+                    sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
 
-           cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
-           //cryp_init(0, KEY_256, 0, AES_ECB, ENCRYPT);
-           cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
-           // wait for DMA crypto to return
-           do {
-               sys_yield();
-           } while (status_reg.dmaout_done == true);
+                    /* now that SDIO has returned, let's return to USB */
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+
+                    break;
+                }
+
+            case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
+                {
+                    /***************************************************
+                     * SDIO/USB block number synchronization
+                     **************************************************/
+                    /*
+                     * INFO: this line makes a copy of the structure. Not impacting here (init phase) but
+                     * should not be used in the dataplane, as it will impact the performances
+                     */
+                    ipc_sync_cmd = ipc_mainloop_cmd.sync_cmd;
+                    /*
+                     * By now, request is sent 'as is' to SDIO. Nevertheless, it would be possible
+                     * to clean the struct content to avoid any data leak before transfering the content
+                     * to sdio task, behavioring like a filter.
+                     */ 
+                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+
+                    id = id_sdio;
+                    size = sizeof(struct sync_command);
+
+                    sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+
+                    /* now that SDIO has returned, let's return to USB */
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+
+                    break;
+                }
+
+
+
+            case DATA_WR_DMA_REQ:
+                {
+                    /***************************************************
+                     * Write mode automaton
+                     **************************************************/
+                    dataplane_command_rw = ipc_mainloop_cmd.dataplane_cmd;
+
+                    //write plane, first exec DMA, then ask SDIO for writing
+                    //cryp_init(0, 0, AES_CBC_ESSIV_h_key, AES_CBC, ENCRYPT);
+                    //
+                    if (cryp_get_dir() == DECRYPT) {
+
+                        cryp_wait_for_emtpy_fifos();
+                        //printf("===> Asking for reinjection!\n");
+                        /* When switching from DECRYPT to ENCRYPT, we have to inject the key again */
+                        id = id_smart;
+                        size = sizeof (struct sync_command);
+                        ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
+                        ipc_sync_cmd.data[0] = ENCRYPT;
+                        ipc_sync_cmd.data_size = (uint8_t)1;
+
+                        sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+
+                        sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+                    }
+
+                    cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
+                    //cryp_init(0, KEY_256, 0, AES_ECB, ENCRYPT);
+                    cryp_do_dma((const uint8_t *)shms_tab[ID_USB].address, (const uint8_t *)shms_tab[ID_SDIO].address, shms_tab[ID_USB].size, dma_in_desc, dma_out_desc);
+                    // wait for DMA crypto to return
+                    do {
+                        sys_yield();
+                    } while (status_reg.dmaout_done == true);
 
 #if CRYPTO_DEBUG
-           printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
+                    printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
 #endif
-           status_reg.dmaout_done = false;
-           // request DMA transfer to SDIO block device (IPC)
+                    status_reg.dmaout_done = false;
+                    // request DMA transfer to SDIO block device (IPC)
 
 
-           sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
+                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
 
-           // wait for SDIO task acknowledge (IPC)
-           sinker = id_sdio;
-           ipcsize = sizeof(struct dataplane_command);
+                    // wait for SDIO task acknowledge (IPC)
+                    sinker = id_sdio;
+                    ipcsize = sizeof(struct dataplane_command);
 
-           ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
+                    ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
 
 #if CRYPTO_DEBUG
-           printf("[write] received ipc from sdio (%d)\n", sinker);
+                    printf("[write] received ipc from sdio (%d)\n", sinker);
 #endif
-           // set ack magic for write ack
-           dataplane_command_ack.magic = DATA_WR_DMA_ACK;
+                    // set ack magic for write ack
+                    dataplane_command_ack.magic = DATA_WR_DMA_ACK;
+                    // acknowledge to USB: data has been written to disk (IPC)
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
+
+                    break;
+                }
 
 
+            case DATA_RD_DMA_REQ:
+                {
+                    dataplane_command_rw = ipc_mainloop_cmd.dataplane_cmd;
+                    /***************************************************
+                     * Read mode automaton
+                     **************************************************/
 
-        } else if (dataplane_command_rw.magic == DATA_RD_DMA_REQ) {
-           /***************************************************
-            * Read mode automaton
-            **************************************************/
+                    // first ask SDIO to load data to its own buffer from the SDCard
+                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
 
-           // first ask SDIO to load data to its own buffer from the SDCard
-           sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&dataplane_command_rw);
+                    // wait for SDIO task acknowledge (IPC)
+                    sinker = id_sdio;
+                    ipcsize = sizeof(struct dataplane_command);
 
-           // wait for SDIO task acknowledge (IPC)
-           sinker = id_sdio;
-           ipcsize = sizeof(struct dataplane_command);
-
-           ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
+                    ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
 
 #if CRYPTO_DEBUG
-           printf("[read] received ipc from sdio (%d): data loaded\n", sinker);
+                    printf("[read] received ipc from sdio (%d): data loaded\n", sinker);
 #endif
 
-           if (cryp_get_dir() == ENCRYPT) {
+                    if (cryp_get_dir() == ENCRYPT) {
 
-               cryp_wait_for_emtpy_fifos();
-	       /* When switching from ENCRYPT to DECRYPT, we only have to prepare the key!
-		* We only have to do the key preparation once when multiple decryptions are done.
-		*/
-		       cryp_set_mode(AES_KEY_PREPARE);
-           }
+                        cryp_wait_for_emtpy_fifos();
+                        /* When switching from ENCRYPT to DECRYPT, we only have to prepare the key!
+                         * We only have to do the key preparation once when multiple decryptions are done.
+                         */
+                        cryp_set_mode(AES_KEY_PREPARE);
+                    }
 
-           cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
-           // read plane, uncypher, from sdio to usb
-           //cryp_init(0, KEY_256, 0, AES_ECB, DECRYPT);
-           cryp_do_dma((const uint8_t *)shms_tab[ID_SDIO].address, (const uint8_t *)shms_tab[ID_USB].address, shms_tab[ID_SDIO].size, dma_in_desc, dma_out_desc);
-           // wait for DMA crypto to return
-           do {
-               sys_yield();
-           } while (status_reg.dmaout_done == true);
+                    cryp_init_user(KEY_256, 0, AES_ECB, DECRYPT);
+                    // read plane, uncypher, from sdio to usb
+                    //cryp_init(0, KEY_256, 0, AES_ECB, DECRYPT);
+                    cryp_do_dma((const uint8_t *)shms_tab[ID_SDIO].address, (const uint8_t *)shms_tab[ID_USB].address, shms_tab[ID_SDIO].size, dma_in_desc, dma_out_desc);
+                    // wait for DMA crypto to return
+                    do {
+                        sys_yield();
+                    } while (status_reg.dmaout_done == true);
 
 #if CRYPTO_DEBUG
-           printf("[read] CRYP DMA has finished !\n");
+                    printf("[read] CRYP DMA has finished !\n");
 #endif
-           // set ack magic for read ack
-           dataplane_command_ack.magic = DATA_RD_DMA_ACK;
+                    // set ack magic for read ack
+                    dataplane_command_ack.magic = DATA_RD_DMA_ACK;
 
-        } else {
-            printf("invalid request from USB !\n");
+                    // acknowledge to USB: data has been written to disk (IPC)
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
+
+                    break;
+
+                }
+
+
+            default:
+                {
+                    printf("invalid request from USB !\n");
+                    // returning INVALID magic to USB
+                    ipc_mainloop_cmd.magic = MAGIC_INVALID;
+
+                    // acknowledge to USB: data has been written to disk (IPC)
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(t_ipc_command), (const char*)&ipc_mainloop_cmd);
+                    break;
+
+                }
         }
 
-        // acknowledge to USB: data has been written to disk (IPC)
-        sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
-        // receiving ipc from USB
 
     }
 
