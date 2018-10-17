@@ -98,7 +98,9 @@ int _main(uint32_t task_id)
     uint8_t id = 0;
     char ipc_buf[32] = {0};
     const char * inject_order = "INJECT";
-    struct sync_command ipc_sync_cmd;
+
+    struct sync_command      ipc_sync_cmd;
+    struct sync_command_data ipc_sync_cmd_data;
 
     strncpy(ipc_buf, inject_order, 6);
 #ifdef CONFIG_APP_CRYPTO_USE_GETCYCLES
@@ -147,7 +149,7 @@ int _main(uint32_t task_id)
      * let's syncrhonize with other tasks
      *******************************************/
     do {
-        size = 2;
+        size = sizeof(struct sync_command);
 
         /*
          * CRYPTO is a central node, it waits for mostly all tasks
@@ -166,7 +168,7 @@ int _main(uint32_t task_id)
         ipc_sync_cmd.state = SYNC_ACKNOWLEDGE;
 
         do {
-            size = 2;
+            size = sizeof(struct sync_command);
             ret = sys_ipc(IPC_SEND_SYNC, id, size, (char*)&ipc_sync_cmd);
         } while (ret != SYS_E_DONE);
 
@@ -191,7 +193,7 @@ int _main(uint32_t task_id)
     
 	unsigned char AES_CBC_ESSIV_h_key[32] = {0};
     /* Then Syncrhonize with crypto */
-    size = 2;
+    size = sizeof(struct sync_command);
 
     printf("sending end_of_init syncrhonization to smart\n");
     ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
@@ -202,14 +204,14 @@ int _main(uint32_t task_id)
     } while (ret == SYS_E_BUSY);
 
     id = id_smart;
-    size = 3 + 32;
+    size = sizeof(struct sync_command_data);
 
-    ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+    ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
 
-    if (   ipc_sync_cmd.magic == MAGIC_CRYPTO_INJECT_RESP
-        && ipc_sync_cmd.state == SYNC_DONE) {
+    if (   ipc_sync_cmd_data.magic == MAGIC_CRYPTO_INJECT_RESP
+        && ipc_sync_cmd_data.state == SYNC_DONE) {
         printf("key injection done from smart. Hash received.\n");
-        memcpy(AES_CBC_ESSIV_h_key, &ipc_sync_cmd.data, ipc_sync_cmd.data_size);
+        memcpy(AES_CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8, ipc_sync_cmd_data.data_size);
 
 #ifdef CRYPTO_DEBUG
         printf("hash received:\n");
@@ -225,7 +227,7 @@ int _main(uint32_t task_id)
      * Let start 2nd pase (SDIO/Crypto/USB runtime)
      *******************************************/
 
-    size = 2;
+    size = sizeof(struct sync_command);
 
     printf("sending end_of_cryp syncrhonization to sdio\n");
     ipc_sync_cmd.magic = MAGIC_TASK_STATE_CMD;
@@ -252,7 +254,7 @@ int _main(uint32_t task_id)
     printf("waiting for end_of_cryp response from USB & SDIO\n");
     for (uint8_t i = 0; i < 2; ++i) {
         id = ANY_APP;
-        size = 2;
+        size = sizeof(struct sync_command);
 
         ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
         if (ret == SYS_E_DONE) {
@@ -335,9 +337,7 @@ int _main(uint32_t task_id)
     //cryp_init_user(KEY_256, AES_CBC_ESSIV_h_key, AES_CBC, ENCRYPT);
     cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
 
-    // hide your children !!
     while (1) {
-        //unsigned char tonpere[32] = { 0 }; // "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f";
         sinker = id_usb;
         ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
@@ -356,21 +356,21 @@ int _main(uint32_t task_id)
                      * INFO: this line makes a copy of the structure. Not impacting here (init phase) but
                      * should not be used in the dataplane, as it will impact the performances
                      */
-                    ipc_sync_cmd = ipc_mainloop_cmd.sync_cmd;
+                    ipc_sync_cmd_data = ipc_mainloop_cmd.sync_cmd_data;
                     /*
                      * By now, request is sent 'as is' to SDIO. Nevertheless, it would be possible
                      * to clean the struct content to avoid any data leak before transfering the content
                      * to sdio task, behavioring like a filter.
                      */ 
-                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 
                     id = id_sdio;
-                    size = sizeof(struct sync_command);
+                    size = sizeof(struct sync_command_data);
 
-                    sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+                    sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
 
                     /* now that SDIO has returned, let's return to USB */
-                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 
                     break;
                 }
@@ -384,21 +384,21 @@ int _main(uint32_t task_id)
                      * INFO: this line makes a copy of the structure. Not impacting here (init phase) but
                      * should not be used in the dataplane, as it will impact the performances
                      */
-                    ipc_sync_cmd = ipc_mainloop_cmd.sync_cmd;
+                    ipc_sync_cmd_data = ipc_mainloop_cmd.sync_cmd_data;
                     /*
                      * By now, request is sent 'as is' to SDIO. Nevertheless, it would be possible
                      * to clean the struct content to avoid any data leak before transfering the content
                      * to sdio task, behavioring like a filter.
                      */ 
-                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 
                     id = id_sdio;
-                    size = sizeof(struct sync_command);
+                    size = sizeof(struct sync_command_data);
 
-                    sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-
+                    sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
+                    
                     /* now that SDIO has returned, let's return to USB */
-                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 
                     break;
                 }
@@ -422,13 +422,13 @@ int _main(uint32_t task_id)
                         /* When switching from DECRYPT to ENCRYPT, we have to inject the key again */
                         id = id_smart;
                         size = sizeof (struct sync_command);
-                        ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
-                        ipc_sync_cmd.data[0] = ENCRYPT;
-                        ipc_sync_cmd.data_size = (uint8_t)1;
+                        ipc_sync_cmd_data.magic = MAGIC_CRYPTO_INJECT_CMD;
+                        ipc_sync_cmd_data.data.u8[0] = ENCRYPT;
+                        ipc_sync_cmd_data.data_size = (uint8_t)1;
 
-                        sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+                        sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd_data);
 
-                        sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+                        sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
                     }
 
                     cryp_init_user(KEY_256, 0, AES_ECB, ENCRYPT);
