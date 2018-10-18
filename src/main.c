@@ -146,7 +146,7 @@ int _main(uint32_t task_id)
     printf("sys_init returns %s !\n", strerror(ret));
 
     /*******************************************
-     * let's syncrhonize with other tasks
+     * let's synchronize with other tasks
      *******************************************/
     do {
         size = sizeof(struct sync_command);
@@ -195,7 +195,7 @@ int _main(uint32_t task_id)
     /* Then Syncrhonize with crypto */
     size = sizeof(struct sync_command);
 
-    printf("sending end_of_init syncrhonization to smart\n");
+    printf("sending end_of_init synchronization to smart\n");
     ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
     ipc_sync_cmd.state = SYNC_READY;
 
@@ -229,7 +229,7 @@ int _main(uint32_t task_id)
 
     size = sizeof(struct sync_command);
 
-    printf("sending end_of_cryp syncrhonization to sdio\n");
+    printf("sending end_of_cryp synchronization to sdio\n");
     ipc_sync_cmd.magic = MAGIC_TASK_STATE_CMD;
     ipc_sync_cmd.state = SYNC_READY;
 
@@ -240,7 +240,7 @@ int _main(uint32_t task_id)
     printf("sending end_of_cryp to sdio done.\n");
 
 
-    printf("sending end_of_cryp syncrhonization to usb\n");
+    printf("sending end_of_cryp synchronization to usb\n");
     ipc_sync_cmd.magic = MAGIC_TASK_STATE_CMD;
     ipc_sync_cmd.state = SYNC_READY;
 
