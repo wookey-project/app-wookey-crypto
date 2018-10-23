@@ -144,6 +144,32 @@ config APP_CRYPTO_PERM_TSK_FIPC
     If y, the application is able to request peer thread execution
     when sending syncrhonous IPC.
 
+config APP_CRYPTO_PERM_TSK_RESET
+    bool "App is allowed to request a board software reset"
+    default n
+    ---help---
+    If y, the application is able to request a MCU reset. This is usefull
+    only if the application is handling events that require urgent reactivity
+    implying board reset.
+
+config APP_CRYPTO_PERM_TSK_UPGRADE
+    bool "App is allowed to upgrade the firmware"
+    default n
+    ---help---
+    If y, the application is able to map the embedded flash device in
+    order to upgrade the overall firmware. This permission should
+    be hosted by a task with no external access (USB, USART...)
+
+
+
+config APP_CRYPTO_PERM_TSK_RNG
+    bool "App is allowed to access an an entropy input source, through sys_get_random"
+    default n
+    ---help---
+    If y, the application is able to request random content from the
+    kernel to generate entropy. This can be use for various needs.
+
+
 endmenu
 
 menu "Memory management"
