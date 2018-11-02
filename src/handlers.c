@@ -1,6 +1,6 @@
-#include "libdma.h"
-#include "libdma_regs.h"
 #include "api/print.h"
+#include "api/types.h"
+#include "api/syscall.h"
 #include "main.h"
 
 #if 1

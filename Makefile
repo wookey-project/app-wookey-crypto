@@ -32,7 +32,7 @@ LDFLAGS += $(AFLAGS) -fno-builtin -nostdlib -nostartfiles
 
 EXTRA_LDFLAGS ?= -Tcrypto.fw1.ld
 LDFLAGS += $(EXTRA_LDFLAGS) -L$(APP_BUILD_DIR) -fno-builtin -nostdlib
-LD_LIBS += -lcryp -ldma -laes -lrng -lstd -L$(APP_BUILD_DIR)
+LD_LIBS += -lcryp -laes -lrng -lstd -L$(APP_BUILD_DIR)
 
 BUILD_DIR ?= $(PROJ_FILES)build
 
@@ -91,7 +91,7 @@ $(APP_BUILD_DIR)/%.o: %.S
 	$(call if_changed,cc_o_c)
 
 # ELF
-$(APP_BUILD_DIR)/$(ELF_NAME): $(ROBJ) $(OBJ) $(SOBJ) $(DRVOBJ) $(BOARD_OBJ) $(CORE_OBJ) $(SOC_OBJ) $(BUILD_DIR)/libs/libstd/libstd.a $(BUILD_DIR)/drivers/libcryp/libcryp.a $(BUILD_DIR)/drivers/libdma/libdma.a
+$(APP_BUILD_DIR)/$(ELF_NAME): $(ROBJ) $(OBJ) $(SOBJ)
 	$(call if_changed,link_o_target)
 
 # HEX

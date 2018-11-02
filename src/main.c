@@ -10,7 +10,6 @@
 #include "api/print.h"
 #include "api/regutils.h"
 #include "libcryp.h"
-#include "libdma.h"
 //#include "dma_regs.h"
 #include "main.h"
 #include "handlers.h"

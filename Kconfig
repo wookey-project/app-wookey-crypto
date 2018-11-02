@@ -5,7 +5,6 @@ config APP_CRYPTO
   depends on STM32F4
   default y
   select USR_DRV_CRYP
-  select USR_DRV_DMA
   select APP_SDIO
   select APP_USB
   ---help---
