@@ -17,8 +17,14 @@
 #include "wookey_ipc.h"
 #include "autoconf.h"
 
-/* Include the AES header (for CBC-ESSIV IV derivation) */
+/* Include the AES or TDES header (for CBC-ESSIV IV derivation) */
+
+#ifdef CONFIG_AES256_CBC_ESSIV
 #include "aes.h"
+#endif
+#ifdef CONFIG_TDES_CBC_ESSIV
+#include "tdes.h"
+#endif
 
 /* The SCSI block size that has been set in the configuration */
 #ifdef CONFIG_USB_DEV_SCSI_BLOCK_SIZE_512
@@ -117,41 +123,64 @@ uint8_t master_key_hash[32] = {0};
 
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
+ * The diversification varies depending on the underlying block cipher.
  */
 int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int hkey_len, uint8_t *iv, unsigned int iv_len){
-	aes_context aes_context;
-	uint8_t sector_number_buff[16] = { 0 };
+        /* The key hash is not really a secret, we can safely use an unprotected (and faster) AES/TDES algorithm.
+         *
+         * NOTE: obviously, we cannot use accelerated AES/TDES here since it is already configured with the master key
+         * to perform blocks encryption/decryption!
+         */
 
-	/* Sanity checks */
-	if((hkey_len != 32) || (iv_len != 16)){
-		goto err;
-	}
+#ifdef CONFIG_AES256_CBC_ESSIV
+        uint8_t sector_number_buff[16] = { 0 };
+        /* Encode the sector number in big endian 16 bytes */
+        uint32_t big_endian_sector_number = to_big32(sector_number);
+        sector_number_buff[0] = (big_endian_sector_number >>  0) & 0xff;
+        sector_number_buff[1] = (big_endian_sector_number >>  8) & 0xff;
+        sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
+        sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
 
-	/* The key hash is not really a secret, we can safely use an unprotected (and faster) AES algorithm.
-	 *
-	 * NOTE: obviously, we cannot use accelerated AES here since it is already configured with the master key
-	 * to perform blocks encryption/decryption!
-	 */
-        if(aes_init(&aes_context, hkey, AES256, NULL, ECB, AES_ENCRYPT, AES_SOFT_MBEDTLS, NULL, NULL, -1, -1)){
-		goto err;
-	}
-
-	/* Encode the sector number in big endian 16 bytes */
-	uint32_t big_endian_sector_number = to_big32(sector_number);
-	sector_number_buff[0] = (big_endian_sector_number >>  0) & 0xff;
-	sector_number_buff[1] = (big_endian_sector_number >>  8) & 0xff;
-	sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
-	sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
-
-	if(aes(&aes_context, sector_number_buff, iv, iv_len, -1, -1)){
-            goto err;
+        /* Sanity checks */
+        if((hkey_len != 32) || (iv_len != 16)){
+                goto err;
         }
 
-	return 0;
+        aes_context aes_context;
+        if(aes_init(&aes_context, hkey, AES256, NULL, ECB, AES_ENCRYPT, AES_SOFT_MBEDTLS, NULL, NULL, -1, -1)){
+                goto err;
+        }
+        if(aes(&aes_context, sector_number_buff, iv, iv_len, -1, -1)){
+            goto err;
+        }
+#else
+#ifdef CONFIG_TDES_CBC_ESSIV
+        uint8_t sector_number_buff[8] = { 0 };
+        /* Encode the sector number in big endian 8 bytes */
+        uint32_t big_endian_sector_number = to_big32(sector_number);
+        sector_number_buff[0] = (big_endian_sector_number >>  0) & 0xff;
+        sector_number_buff[1] = (big_endian_sector_number >>  8) & 0xff;
+        sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
+        sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
+
+        des3_context des3_context;
+        /* Sanity checks */
+        if((hkey_len != 24) || (iv_len != 8)){
+                goto err;
+        }
+        des3_set_3keys(&des3_context, &(hkey[0]), &(hkey[8]), &(hkey[16]));
+        des3_encrypt(&des3_context, sector_number_buff, iv);
+
+#else
+#error "No FDE algorithm has been selected ..."
+#endif
+#endif        
+        return 0;
 err:
-	return -1;
+        return -1;
 
 }
+
 
 
 /*
@@ -263,7 +292,7 @@ int _main(uint32_t task_id)
      *******************************************/
 
     
-	unsigned char AES_CBC_ESSIV_h_key[32] = {0};
+	unsigned char CBC_ESSIV_h_key[32] = {0};
     /* Then Syncrhonize with crypto */
     size = sizeof(struct sync_command);
 
@@ -283,11 +312,11 @@ int _main(uint32_t task_id)
     if (   ipc_sync_cmd_data.magic == MAGIC_CRYPTO_INJECT_RESP
         && ipc_sync_cmd_data.state == SYNC_DONE) {
         printf("key injection done from smart. Hash received.\n");
-        memcpy(AES_CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8, ipc_sync_cmd_data.data_size);
+        memcpy(CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8, ipc_sync_cmd_data.data_size);
 
 #ifdef CRYPTO_DEBUG
         printf("hash received:\n");
-        hexdump(AES_CBC_ESSIV_h_key, 32);
+        hexdump(CBC_ESSIV_h_key, 32);
 #endif
     } else {
         goto err;
@@ -406,7 +435,15 @@ int _main(uint32_t task_id)
     //logsize_t ipcsize = 0;
 
     // Default mode is encryption
-    cryp_init_user(KEY_256, NULL, AES_ECB, ENCRYPT);
+#ifdef CONFIG_AES256_CBC_ESSIV
+    cryp_init_user(KEY_256, NULL, 0, AES_CBC, ENCRYPT);
+#else
+#ifdef CONFIG_TDES_CBC_ESSIV 
+    cryp_init_user(KEY_192, NULL, 0, TDES_CBC, ENCRYPT);
+#else
+#error "No FDE algorithm has been selected ..."
+#endif
+#endif
 
     while (1) {
         /* requests can come from USB, SDIO, or SMART */
@@ -521,6 +558,8 @@ int _main(uint32_t task_id)
                     sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
                     sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
 
+                    /* Ask smart to reinject the key (only for AES) */
+#ifdef CONFIG_AES256_CBC_ESSIV
                     //write plane, first exec DMA, then ask SDIO for writing
                     //
                     if (cryp_get_dir() == DECRYPT) {
@@ -541,35 +580,46 @@ int _main(uint32_t task_id)
                         printf("===> Key reinjection done!\n");
 #endif
                     }
+#endif
 
 
-                    /********* ENCRYPTION LOGIC ************************************************************/
-                    /* We have to split our encryption in multiple subencryptions to deal with IV modification on the crypto block size boundaries
-                     * boundaries.
-                     */
-                    if((scsi_block_size == 0) || (sdio_block_size == 0)){
-                        printf("Error: DMA WR request while the block sizes have not been read!\n");
-                        goto err;
-                    }
-                    uint32_t num_cryp_blocks = scsi_num_sectors;
-                    uint32_t usb_address = shms_tab[ID_USB].address;
-                    uint32_t sdio_address = shms_tab[ID_SDIO].address;
-                    unsigned int i;
-                    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
-                    for(i = 0; i < num_cryp_blocks; i++){
-                        uint8_t curr_essiv_iv[16] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i), AES_CBC_ESSIV_h_key, sizeof(AES_CBC_ESSIV_h_key), curr_essiv_iv, sizeof(curr_essiv_iv));
-                        cryp_init_user(KEY_256, curr_essiv_iv, AES_CBC, ENCRYPT);
-                        status_reg.dmaout_done = false;
-                        cryp_do_dma((const uint8_t *)usb_address, (const uint8_t *)sdio_address, scsi_block_size, dma_in_desc, dma_out_desc);
-                        while (status_reg.dmaout_done == false){
-                            continue;
-                        }
-                        cryp_wait_for_emtpy_fifos();
-                        usb_address  += scsi_block_size;
-                        sdio_address += scsi_block_size;
-                    }
-                    /****************************************************************************************/
+		    /********* ENCRYPTION LOGIC ************************************************************/
+		    /* We have to split our encryption in multiple subencryptions to deal with IV modification on the crypto block size boundaries
+		     * boundaries.
+		     */
+		    if((scsi_block_size == 0) || (sdio_block_size == 0)){
+			    printf("Error: DMA WR request while the block sizes have not been read!\n");
+			    goto err;
+		    }
+		    uint32_t num_cryp_blocks = scsi_num_sectors;
+		    uint32_t usb_address = shms_tab[ID_USB].address;
+		    uint32_t sdio_address = shms_tab[ID_SDIO].address;
+		    unsigned int i;
+		    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
+		    for(i = 0; i < num_cryp_blocks; i++){
+#ifdef CONFIG_AES256_CBC_ESSIV
+                uint8_t curr_essiv_iv[16] = { 0 };
+                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
+                cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, ENCRYPT);
+#else
+#ifdef CONFIG_TDES_CBC_ESSIV
+                uint8_t curr_essiv_iv[8] = { 0 };
+                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
+                cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, ENCRYPT);
+#else
+#error "No FDE algorithm has been selected ..."
+#endif
+#endif
+                status_reg.dmaout_done = false;
+                cryp_do_dma((const uint8_t *)usb_address, (const uint8_t *)sdio_address, scsi_block_size, dma_in_desc, dma_out_desc);
+                while (status_reg.dmaout_done == false){
+                    continue;
+                }
+                cryp_wait_for_emtpy_fifos();
+			    usb_address  += scsi_block_size;
+			    sdio_address += scsi_block_size;
+		    }
+		    /****************************************************************************************/
 #if CRYPTO_DEBUG
                     printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
 #endif
@@ -628,43 +678,56 @@ int _main(uint32_t task_id)
                     printf("[read] received ipc from sdio (%d): data loaded\n", sinker);
 #endif
 
+#ifdef CONFIG_AES256_CBC_ESSIV
+                    /* Prepare the Key (only for AES) */
                     if (cryp_get_dir() == ENCRYPT) {
                         /* When switching from ENCRYPT to DECRYPT, we only have to prepare the key!
                          * We only have to do the key preparation once when multiple decryptions are done.
                          */
 #if CRYPTO_DEBUG
-			printf("[read] Preparing AES key\n");
+                        printf("[read] Preparing AES key\n");
 #endif
                         cryp_set_mode(AES_KEY_PREPARE);
                     }
+#endif
 
-                    /********* DECRYPTION LOGIC ************************************************************/
-                    /* We have to split our decryption in multiple subdecryptions to deal with IV modification on the crypto block size boundaries
-                     * boundaries.
-                     */
-                    if((scsi_block_size == 0) || (sdio_block_size == 0)){
-                        printf("Error: DMA DR request while the block sizes have not been read!\n");
-                        goto err;
-                    }
-                    uint32_t num_cryp_blocks = scsi_num_sectors;
-                    uint32_t usb_address = shms_tab[ID_USB].address;
-                    uint32_t sdio_address = shms_tab[ID_SDIO].address;
-                    unsigned int i;
-                    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
-                    for(i = 0; i < num_cryp_blocks; i++){
-                        uint8_t curr_essiv_iv[16] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i), AES_CBC_ESSIV_h_key, sizeof(AES_CBC_ESSIV_h_key), curr_essiv_iv, sizeof(curr_essiv_iv));
-                        cryp_init_user(KEY_256, curr_essiv_iv, AES_CBC, DECRYPT);
-                        status_reg.dmaout_done = false;
-                        cryp_do_dma((const uint8_t *)sdio_address, (const uint8_t *)usb_address, scsi_block_size, dma_in_desc, dma_out_desc);
-                        while (status_reg.dmaout_done == false){
-                            continue;
-                        }
-                        cryp_wait_for_emtpy_fifos();
-                        usb_address  += scsi_block_size;
-                        sdio_address += scsi_block_size;
-                    }
-                    /****************************************************************************************/
+		    /********* DECRYPTION LOGIC ************************************************************/
+		    /* We have to split our decryption in multiple subdecryptions to deal with IV modification on the crypto block size boundaries
+		     * boundaries.
+		     */
+		    if((scsi_block_size == 0) || (sdio_block_size == 0)){
+			    printf("Error: DMA DR request while the block sizes have not been read!\n");
+			    goto err;
+		    }
+		    uint32_t num_cryp_blocks = scsi_num_sectors;
+		    uint32_t usb_address = shms_tab[ID_USB].address;
+		    uint32_t sdio_address = shms_tab[ID_SDIO].address;
+		    unsigned int i;
+		    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
+		    for(i = 0; i < num_cryp_blocks; i++){
+#ifdef CONFIG_AES256_CBC_ESSIV
+                uint8_t curr_essiv_iv[16] = { 0 };
+                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
+                cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, DECRYPT);
+#else
+#ifdef CONFIG_TDES_CBC_ESSIV
+                uint8_t curr_essiv_iv[8] = { 0 };
+                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
+                cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, DECRYPT);
+#else
+#error "No FDE algorithm has been selected ..."
+#endif
+#endif
+			    status_reg.dmaout_done = false;
+        	    cryp_do_dma((const uint8_t *)sdio_address, (const uint8_t *)usb_address, scsi_block_size, dma_in_desc, dma_out_desc);
+	            while (status_reg.dmaout_done == false){
+				    continue;
+			    }
+                cryp_wait_for_emtpy_fifos();
+			    usb_address  += scsi_block_size;
+			    sdio_address += scsi_block_size;
+		    }
+		    /****************************************************************************************/
 
 
 #if CRYPTO_DEBUG
