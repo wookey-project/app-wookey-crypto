@@ -105,3 +105,4 @@ $(APP_BUILD_DIR)/$(BIN_NAME): $(APP_BUILD_DIR)/$(ELF_NAME)
 $(APP_BUILD_DIR):
 	$(call cmd,mkdir)
 
+-include $(DEP)
