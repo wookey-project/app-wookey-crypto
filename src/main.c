@@ -409,7 +409,8 @@ int _main(uint32_t task_id)
     cryp_init_user(KEY_256, NULL, AES_ECB, ENCRYPT);
 
     while (1) {
-        sinker = id_usb;
+        /* requests can come from USB, SDIO, or SMART */
+        sinker = ANY_APP;
         ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
 
@@ -423,6 +424,10 @@ int _main(uint32_t task_id)
                     /***************************************************
                      * SDIO/USB block size synchronization
                      **************************************************/
+                    if (sinker != id_usb) {
+                        printf("block size request command only allowed from USB app\n");
+                        continue;
+                    }
                     /*
                      * INFO: this line makes a copy of the structure. Not impacting here (init phase) but
                      * should not be used in the dataplane, as it will impact the performances
@@ -440,13 +445,13 @@ int _main(uint32_t task_id)
 
                     sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
 
-		    /* Save the block sizes (SDIO and SCSI) since we will need it later */
-		    sdio_block_size = ipc_sync_cmd_data.data.u32[0];
-		    /* Override the SCSI block size and number */
-		    /* FIXME: use a uint64_t to avoid overflows */
-		    ipc_sync_cmd_data.data.u32[1] = (ipc_sync_cmd_data.data.u32[1] / scsi_block_size) * ipc_sync_cmd_data.data.u32[0];
-		    ipc_sync_cmd_data.data.u32[0] = scsi_block_size;
-		    
+                    /* Save the block sizes (SDIO and SCSI) since we will need it later */
+                    sdio_block_size = ipc_sync_cmd_data.data.u32[0];
+                    /* Override the SCSI block size and number */
+                    /* FIXME: use a uint64_t to avoid overflows */
+                    ipc_sync_cmd_data.data.u32[1] = (ipc_sync_cmd_data.data.u32[1] / scsi_block_size) * ipc_sync_cmd_data.data.u32[0];
+                    ipc_sync_cmd_data.data.u32[0] = scsi_block_size;
+
 
                     /* now that SDIO has returned, let's return to USB */
                     sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
@@ -459,15 +464,20 @@ int _main(uint32_t task_id)
                     /***************************************************
                      * SDIO/USB block number synchronization
                      **************************************************/
-		    /* Get the block size */
-		    struct sync_command_data ipc_sync_get_block_size = { 0 };
-		    ipc_sync_get_block_size.magic = MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD;
+
+                    if (sinker != id_usb) {
+                        printf("block num request command only allowed from USB app\n");
+                        continue;
+                    }
+                    /* Get the block size */
+                    struct sync_command_data ipc_sync_get_block_size = { 0 };
+                    ipc_sync_get_block_size.magic = MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD;
                     sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command_data), (char*)&ipc_sync_get_block_size);
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
                     sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_get_block_size);
-		    
-		    sdio_block_size = ipc_sync_cmd_data.data.u32[0];
+
+                    sdio_block_size = ipc_sync_cmd_data.data.u32[0];
 
                     /*
                      * INFO: this line makes a copy of the structure. Not impacting here (init phase) but
@@ -500,12 +510,16 @@ int _main(uint32_t task_id)
                     /***************************************************
                      * Write mode automaton
                      **************************************************/
+                    if (sinker != id_usb) {
+                        printf("data wr DMA request command only allowed from USB app\n");
+                        continue;
+                    }
                     dataplane_command_rw = ipc_mainloop_cmd.dataplane_cmd;
-    		    struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
-		    uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
-		    uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
-		    sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
-		    sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
+                    struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
+                    uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
+                    uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
+                    sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
+                    sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
 
                     //write plane, first exec DMA, then ask SDIO for writing
                     //
@@ -524,38 +538,38 @@ int _main(uint32_t task_id)
 
                         sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
 #if CRYPTO_DEBUG
-			printf("===> Key reinjection done!\n");
+                        printf("===> Key reinjection done!\n");
 #endif
                     }
 
 
-		    /********* ENCRYPTION LOGIC ************************************************************/
-		    /* We have to split our encryption in multiple subencryptions to deal with IV modification on the crypto block size boundaries
-		     * boundaries.
-		     */
-		    if((scsi_block_size == 0) || (sdio_block_size == 0)){
-			    printf("Error: DMA WR request while the block sizes have not been read!\n");
-			    goto err;
-		    }
-		    uint32_t num_cryp_blocks = scsi_num_sectors;
-		    uint32_t usb_address = shms_tab[ID_USB].address;
-		    uint32_t sdio_address = shms_tab[ID_SDIO].address;
-		    unsigned int i;
-		    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
-		    for(i = 0; i < num_cryp_blocks; i++){
-			    uint8_t curr_essiv_iv[16] = { 0 };
-			    cbc_essiv_iv_derivation((scsi_sector_address + i), AES_CBC_ESSIV_h_key, sizeof(AES_CBC_ESSIV_h_key), curr_essiv_iv, sizeof(curr_essiv_iv));
-			    cryp_init_user(KEY_256, curr_essiv_iv, AES_CBC, ENCRYPT);
-			    status_reg.dmaout_done = false;
-        	            cryp_do_dma((const uint8_t *)usb_address, (const uint8_t *)sdio_address, scsi_block_size, dma_in_desc, dma_out_desc);
-	                    while (status_reg.dmaout_done == false){
-				continue;
-			    }
-                    	    cryp_wait_for_emtpy_fifos();
-			    usb_address  += scsi_block_size;
-			    sdio_address += scsi_block_size;
-		    }
-		    /****************************************************************************************/
+                    /********* ENCRYPTION LOGIC ************************************************************/
+                    /* We have to split our encryption in multiple subencryptions to deal with IV modification on the crypto block size boundaries
+                     * boundaries.
+                     */
+                    if((scsi_block_size == 0) || (sdio_block_size == 0)){
+                        printf("Error: DMA WR request while the block sizes have not been read!\n");
+                        goto err;
+                    }
+                    uint32_t num_cryp_blocks = scsi_num_sectors;
+                    uint32_t usb_address = shms_tab[ID_USB].address;
+                    uint32_t sdio_address = shms_tab[ID_SDIO].address;
+                    unsigned int i;
+                    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
+                    for(i = 0; i < num_cryp_blocks; i++){
+                        uint8_t curr_essiv_iv[16] = { 0 };
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), AES_CBC_ESSIV_h_key, sizeof(AES_CBC_ESSIV_h_key), curr_essiv_iv, sizeof(curr_essiv_iv));
+                        cryp_init_user(KEY_256, curr_essiv_iv, AES_CBC, ENCRYPT);
+                        status_reg.dmaout_done = false;
+                        cryp_do_dma((const uint8_t *)usb_address, (const uint8_t *)sdio_address, scsi_block_size, dma_in_desc, dma_out_desc);
+                        while (status_reg.dmaout_done == false){
+                            continue;
+                        }
+                        cryp_wait_for_emtpy_fifos();
+                        usb_address  += scsi_block_size;
+                        sdio_address += scsi_block_size;
+                    }
+                    /****************************************************************************************/
 #if CRYPTO_DEBUG
                     printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
 #endif
@@ -585,18 +599,22 @@ int _main(uint32_t task_id)
 
             case DATA_RD_DMA_REQ:
                 {
-                    dataplane_command_rw = ipc_mainloop_cmd.dataplane_cmd;
                     /***************************************************
                      * Read mode automaton
                      **************************************************/
+                    if (sinker != id_usb) {
+                        printf("data rd DMA request command only allowed from USB app\n");
+                        continue;
+                    }
+                    dataplane_command_rw = ipc_mainloop_cmd.dataplane_cmd;
 
                     cryp_wait_for_emtpy_fifos();
                     // first ask SDIO to load data to its own buffer from the SDCard
-    		    struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
-		    uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
-		    uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
-		    sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
-		    sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
+                    struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
+                    uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
+                    uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
+                    sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
+                    sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
 
                     sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&sdio_dataplane_command_rw);
 
@@ -620,33 +638,33 @@ int _main(uint32_t task_id)
                         cryp_set_mode(AES_KEY_PREPARE);
                     }
 
-		    /********* DECRYPTION LOGIC ************************************************************/
-		    /* We have to split our decryption in multiple subdecryptions to deal with IV modification on the crypto block size boundaries
-		     * boundaries.
-		     */
-		    if((scsi_block_size == 0) || (sdio_block_size == 0)){
-			    printf("Error: DMA DR request while the block sizes have not been read!\n");
-			    goto err;
-		    }
-		    uint32_t num_cryp_blocks = scsi_num_sectors;
-		    uint32_t usb_address = shms_tab[ID_USB].address;
-		    uint32_t sdio_address = shms_tab[ID_SDIO].address;
-		    unsigned int i;
-		    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
-		    for(i = 0; i < num_cryp_blocks; i++){
-			    uint8_t curr_essiv_iv[16] = { 0 };
-			    cbc_essiv_iv_derivation((scsi_sector_address + i), AES_CBC_ESSIV_h_key, sizeof(AES_CBC_ESSIV_h_key), curr_essiv_iv, sizeof(curr_essiv_iv));
-			    cryp_init_user(KEY_256, curr_essiv_iv, AES_CBC, DECRYPT);
-			    status_reg.dmaout_done = false;
-        	            cryp_do_dma((const uint8_t *)sdio_address, (const uint8_t *)usb_address, scsi_block_size, dma_in_desc, dma_out_desc);
-	                    while (status_reg.dmaout_done == false){
-				continue;
-			    }
-                    	    cryp_wait_for_emtpy_fifos();
-			    usb_address  += scsi_block_size;
-			    sdio_address += scsi_block_size;
-		    }
-		    /****************************************************************************************/
+                    /********* DECRYPTION LOGIC ************************************************************/
+                    /* We have to split our decryption in multiple subdecryptions to deal with IV modification on the crypto block size boundaries
+                     * boundaries.
+                     */
+                    if((scsi_block_size == 0) || (sdio_block_size == 0)){
+                        printf("Error: DMA DR request while the block sizes have not been read!\n");
+                        goto err;
+                    }
+                    uint32_t num_cryp_blocks = scsi_num_sectors;
+                    uint32_t usb_address = shms_tab[ID_USB].address;
+                    uint32_t sdio_address = shms_tab[ID_SDIO].address;
+                    unsigned int i;
+                    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
+                    for(i = 0; i < num_cryp_blocks; i++){
+                        uint8_t curr_essiv_iv[16] = { 0 };
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), AES_CBC_ESSIV_h_key, sizeof(AES_CBC_ESSIV_h_key), curr_essiv_iv, sizeof(curr_essiv_iv));
+                        cryp_init_user(KEY_256, curr_essiv_iv, AES_CBC, DECRYPT);
+                        status_reg.dmaout_done = false;
+                        cryp_do_dma((const uint8_t *)sdio_address, (const uint8_t *)usb_address, scsi_block_size, dma_in_desc, dma_out_desc);
+                        while (status_reg.dmaout_done == false){
+                            continue;
+                        }
+                        cryp_wait_for_emtpy_fifos();
+                        usb_address  += scsi_block_size;
+                        sdio_address += scsi_block_size;
+                    }
+                    /****************************************************************************************/
 
 
 #if CRYPTO_DEBUG
@@ -663,8 +681,25 @@ int _main(uint32_t task_id)
                 }
 
 
+            case MAGIC_STORAGE_EJECTED:
+                {
+                    /***************************************************
+                     * SDIO mass-storage device ejected
+                     **************************************************/
+                    if (sinker != id_sdio) {
+                        printf("ejected storage event command only allowed from SDIO app\n");
+                        continue;
+                    }
+
+                    sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(t_ipc_command), (const char*)&ipc_mainloop_cmd);
+                    break;
+                }
+
             default:
                 {
+                    /***************************************************
+                     * Invalid request. Returning invalid to sender
+                     **************************************************/
                     printf("invalid request from USB !\n");
                     // returning INVALID magic to USB
                     ipc_mainloop_cmd.magic = MAGIC_INVALID;
