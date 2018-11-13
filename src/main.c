@@ -401,7 +401,7 @@ int _main(uint32_t task_id)
     logsize_t ipcsize = sizeof(ipc_mainloop_cmd);
 
     struct dataplane_command dataplane_command_rw = { 0 };
-    struct dataplane_command dataplane_command_ack = { DATA_WR_DMA_ACK, 0, 0 };
+    struct dataplane_command dataplane_command_ack = { MAGIC_DATA_WR_DMA_ACK, 0, 0 };
     uint8_t sinker = 0;
     //logsize_t ipcsize = 0;
 
@@ -505,7 +505,7 @@ int _main(uint32_t task_id)
                     break;
                 }
 
-            case DATA_WR_DMA_REQ:
+            case MAGIC_DATA_WR_DMA_REQ:
                 {
                     /***************************************************
                      * Write mode automaton
@@ -589,7 +589,7 @@ int _main(uint32_t task_id)
                     printf("[write] received ipc from sdio (%d)\n", sinker);
 #endif
                     // set ack magic for write ack
-                    dataplane_command_ack.magic = DATA_WR_DMA_ACK;
+                    dataplane_command_ack.magic = MAGIC_DATA_WR_DMA_ACK;
                     // acknowledge to USB: data has been written to disk (IPC)
                     sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
 
@@ -597,7 +597,7 @@ int _main(uint32_t task_id)
                 }
 
 
-            case DATA_RD_DMA_REQ:
+            case MAGIC_DATA_RD_DMA_REQ:
                 {
                     /***************************************************
                      * Read mode automaton
@@ -671,7 +671,7 @@ int _main(uint32_t task_id)
                     printf("[read] CRYP DMA has finished !\n");
 #endif
                     // set ack magic for read ack
-                    dataplane_command_ack.magic = DATA_RD_DMA_ACK;
+                    dataplane_command_ack.magic = MAGIC_DATA_RD_DMA_ACK;
 
                     // acknowledge to USB: data has been written to disk (IPC)
                     sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
