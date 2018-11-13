@@ -14,7 +14,7 @@
 #include "main.h"
 #include "handlers.h"
 #include "aes.h"
-#include "ipc_proto.h"
+#include "wookey_ipc.h"
 #include "autoconf.h"
 
 /* Include the AES header (for CBC-ESSIV IV derivation) */
