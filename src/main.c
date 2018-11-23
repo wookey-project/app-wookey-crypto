@@ -314,7 +314,7 @@ int _main(uint32_t task_id)
         printf("key injection done from smart. Hash received.\n");
         memcpy(CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8, ipc_sync_cmd_data.data_size);
 
-#ifdef CRYPTO_DEBUG
+#if CONFIG_SMARTCARD_DEBUG
         printf("hash received:\n");
         hexdump(CBC_ESSIV_h_key, 32);
 #endif
