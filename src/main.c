@@ -80,7 +80,8 @@ enum shms {
 volatile struct {
     uint32_t address;
     uint16_t size;
-} shms_tab[2] = { 0 };
+} shms_tab[2] = { { .address = 0, .size = 0 },
+                  { .address = 0, .size = 0 }};
 
 uint32_t td_dma = 0;
 
@@ -426,11 +427,20 @@ int _main(uint32_t task_id)
      *     SDIO DMA will then read from it and write into the SDIO
      *     storage
      *******************************************/
-    t_ipc_command ipc_mainloop_cmd = { 0 };
+    t_ipc_command ipc_mainloop_cmd;
+    memset((void*)&ipc_mainloop_cmd, 0, sizeof(t_ipc_command));
     logsize_t ipcsize = sizeof(ipc_mainloop_cmd);
 
-    struct dataplane_command dataplane_command_rw = { 0 };
-    struct dataplane_command dataplane_command_ack = { MAGIC_DATA_WR_DMA_ACK, 0, 0 };
+    struct dataplane_command dataplane_command_rw = {
+        .magic = MAGIC_INVALID,
+        .sector_address = 0,
+        .num_sectors = 0
+    };
+    struct dataplane_command dataplane_command_ack = { 
+        .magic = MAGIC_DATA_WR_DMA_ACK,
+        .sector_address = 0,
+        .num_sectors = 0
+    };
     uint8_t sinker = 0;
     //logsize_t ipcsize = 0;
 

@@ -28,10 +28,11 @@ CFLAGS += -Isrc/ -Iinc/
 CFLAGS += $(APPS_CFLAGS)
 CFLAGS += -MMD -MP
 
-LDFLAGS += $(AFLAGS) -fno-builtin -nostdlib -nostartfiles
+LDFLAGS += $(AFLAGS_GCC) -fno-builtin -nostdlib -nostartfiles
+#-fno-builtin -nostdlib
 
 EXTRA_LDFLAGS ?= -Tcrypto.fw1.ld
-LDFLAGS += $(EXTRA_LDFLAGS) -L$(APP_BUILD_DIR) -fno-builtin -nostdlib
+LDFLAGS += -L$(APP_BUILD_DIR) $(EXTRA_LDFLAGS) -fno-builtin -nostdlib
 LD_LIBS += -lcryp -laes -lrng -lstd -L$(APP_BUILD_DIR)
 
 BUILD_DIR ?= $(PROJ_FILES)build
