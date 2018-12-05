@@ -33,7 +33,7 @@ LDFLAGS += $(AFLAGS_GCC) -fno-builtin -nostdlib -nostartfiles
 
 EXTRA_LDFLAGS ?= -Tcrypto.fw1.ld
 LDFLAGS += -L$(APP_BUILD_DIR) $(EXTRA_LDFLAGS) -fno-builtin -nostdlib
-LD_LIBS += -lcryp -laes -lrng -lstd -L$(APP_BUILD_DIR)
+LD_LIBS += -lcryp -laes -lstd -L$(APP_BUILD_DIR)
 
 BUILD_DIR ?= $(PROJ_FILES)build
 
