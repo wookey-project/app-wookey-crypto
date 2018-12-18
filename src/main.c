@@ -565,8 +565,25 @@ int _main(uint32_t task_id)
                     struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
                     uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
                     uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
-                    sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
-                    sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
+                    
+                    uint64_t tmp = scsi_num_sectors;
+                    tmp *= scsi_block_size;
+                    tmp /= sdio_block_size;
+
+                    if (tmp > 0xffffffff) {
+                        printf("PANIC! scsi num sectors calculation generated overflow !!!\n");
+                    }
+                    sdio_dataplane_command_rw.num_sectors = (uint32_t)tmp;
+
+                    tmp = dataplane_command_rw.sector_address;
+                    tmp *= scsi_block_size;
+                    tmp /= sdio_block_size;
+
+                    // FIXME:
+                    if (tmp > 0xffffffff) {
+                        printf("PANIC! scsi sector adress calculation generated overflow !!!\n");
+                    }
+                    sdio_dataplane_command_rw.sector_address = (uint32_t)tmp;
 
                     /* Ask smart to reinject the key (only for AES) */
 #ifdef CONFIG_AES256_CBC_ESSIV
@@ -673,8 +690,23 @@ int _main(uint32_t task_id)
                     struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
                     uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
                     uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
-                    sdio_dataplane_command_rw.num_sectors = (scsi_num_sectors * scsi_block_size) / sdio_block_size;
-                    sdio_dataplane_command_rw.sector_address = (dataplane_command_rw.sector_address * scsi_block_size) / sdio_block_size;
+
+                    uint64_t tmp = scsi_num_sectors;
+                    tmp *= scsi_block_size;
+                    tmp /= sdio_block_size;
+
+                    if (tmp > 0xffffffff) {
+                        printf("PANIC! scsi num sectors calculation generated overflow !!!\n");
+                    }
+                    sdio_dataplane_command_rw.num_sectors = (uint32_t)tmp;
+
+                    tmp = dataplane_command_rw.sector_address;
+                    tmp *= scsi_block_size;
+                    tmp /= sdio_block_size;
+                    if (tmp > 0xffffffff) {
+                        printf("PANIC! scsi sector adress calculation generated overflow !!!\n");
+                    }
+                    sdio_dataplane_command_rw.sector_address = (uint32_t)tmp;
 
                     sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&sdio_dataplane_command_rw);
 
