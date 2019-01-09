@@ -41,7 +41,7 @@
         #else
             #ifdef CONFIG_USB_DEV_SCSI_BLOCK_SIZE_8192
               #define SCSI_BLOCK_SIZE 8192
-            #else 
+            #else
                #error "SCSI block size is not defined!"
             #endif
         #endif
@@ -175,7 +175,7 @@ int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int 
 #else
 #error "No FDE algorithm has been selected ..."
 #endif
-#endif        
+#endif
         return 0;
 err:
         return -1;
@@ -241,7 +241,7 @@ int _main(uint32_t task_id)
     ret = sys_init(INIT_GETTASKID, "benchlog", &id_benchlog);
     printf("benchlog is task %x !\n", id_benchlog);
 
-    cryp_early_init(true, CRYP_USER, CRYP_PRODMODE, (int*) &dma_in_desc, (int*) &dma_out_desc);
+    cryp_early_init(true, CRYP_MAP_AUTO, CRYP_USER, CRYP_PRODMODE, (int*) &dma_in_desc, (int*) &dma_out_desc);
 
     printf("set init as done\n");
     ret = sys_init(INIT_DONE);
@@ -292,7 +292,7 @@ int _main(uint32_t task_id)
      * get back key hash
      *******************************************/
 
-    
+
 	unsigned char CBC_ESSIV_h_key[32] = {0};
     /* Then Syncrhonize with crypto */
     size = sizeof(struct sync_command);
@@ -436,7 +436,7 @@ int _main(uint32_t task_id)
         .sector_address = 0,
         .num_sectors = 0
     };
-    struct dataplane_command dataplane_command_ack = { 
+    struct dataplane_command dataplane_command_ack = {
         .magic = MAGIC_DATA_WR_DMA_ACK,
         .sector_address = 0,
         .num_sectors = 0
@@ -448,7 +448,7 @@ int _main(uint32_t task_id)
 #ifdef CONFIG_AES256_CBC_ESSIV
     cryp_init_user(KEY_256, NULL, 0, AES_CBC, ENCRYPT);
 #else
-#ifdef CONFIG_TDES_CBC_ESSIV 
+#ifdef CONFIG_TDES_CBC_ESSIV
     cryp_init_user(KEY_192, NULL, 0, TDES_CBC, ENCRYPT);
 #else
 #error "No FDE algorithm has been selected ..."
@@ -484,7 +484,7 @@ int _main(uint32_t task_id)
                      * By now, request is sent 'as is' to SDIO. Nevertheless, it would be possible
                      * to clean the struct content to avoid any data leak before transfering the content
                      * to sdio task, behavioring like a filter.
-                     */ 
+                     */
                     sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 
                     id = id_sdio;
@@ -535,7 +535,7 @@ int _main(uint32_t task_id)
                      * By now, request is sent 'as is' to SDIO. Nevertheless, it would be possible
                      * to clean the struct content to avoid any data leak before transfering the content
                      * to sdio task, behavioring like a filter.
-                     */ 
+                     */
                     sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 
                     id = id_sdio;
@@ -565,7 +565,7 @@ int _main(uint32_t task_id)
                     struct dataplane_command sdio_dataplane_command_rw = dataplane_command_rw;
                     uint32_t scsi_num_sectors = dataplane_command_rw.num_sectors;
                     uint32_t scsi_sector_address = dataplane_command_rw.sector_address;
-                    
+
                     uint64_t tmp = scsi_num_sectors;
                     tmp *= scsi_block_size;
                     tmp /= sdio_block_size;
