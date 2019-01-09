@@ -625,26 +625,39 @@ int _main(uint32_t task_id)
 		    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
 		    for(i = 0; i < num_cryp_blocks; i++){
 #ifdef CONFIG_AES256_CBC_ESSIV
-                uint8_t curr_essiv_iv[16] = { 0 };
-                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
-                cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, ENCRYPT);
+	                uint8_t curr_essiv_iv[16] = { 0 };
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
+DMA_WR_XFR_AGAIN:
+                	cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, ENCRYPT);
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
-                uint8_t curr_essiv_iv[8] = { 0 };
-                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
-                cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, ENCRYPT);
+	                uint8_t curr_essiv_iv[8] = { 0 };
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
+DMA_WR_XFR_AGAIN:
+                	cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, ENCRYPT);
 #else
 #error "No FDE algorithm has been selected ..."
 #endif
 #endif
-                status_reg.dmaout_done = false;
-                cryp_do_dma((const uint8_t *)usb_address, (const uint8_t *)sdio_address, scsi_block_size, dma_in_desc, dma_out_desc);
-                while (status_reg.dmaout_done == false){
-                    continue;
-                }
-                cryp_wait_for_emtpy_fifos();
-			    usb_address  += scsi_block_size;
-			    sdio_address += scsi_block_size;
+	                status_reg.dmain_fifo_err = status_reg.dmain_dm_err = status_reg.dmain_tr_err = false;
+        	        status_reg.dmaout_fifo_err = status_reg.dmaout_dm_err = status_reg.dmaout_tr_err = false;
+                	status_reg.dmaout_done = status_reg.dmain_done = false;
+	                cryp_do_dma((const uint8_t *)usb_address, (const uint8_t *)sdio_address, scsi_block_size, dma_in_desc, dma_out_desc);
+        	        while (status_reg.dmaout_done == false){
+                	        /* Do we have an error? If yes, try again the DMA transfer, if no continue to wait */
+                        	bool dma_error = status_reg.dmaout_fifo_err || status_reg.dmaout_dm_err || status_reg.dmaout_tr_err;
+                        	if(dma_error == true){
+#if CRYPTO_DEBUG
+                                	printf("CRYP DMA WR out error ... Trying again\n");
+#endif
+                                	cryp_flush_fifos();
+                                	goto DMA_WR_XFR_AGAIN;
+                        	}
+                        	continue;
+                	}
+                	cryp_wait_for_emtpy_fifos();
+			usb_address  += scsi_block_size;
+			sdio_address += scsi_block_size;
 		    }
 		    /****************************************************************************************/
 #if CRYPTO_DEBUG
@@ -748,26 +761,38 @@ int _main(uint32_t task_id)
 		    /* [RB] FIXME: sanity checks on the USB and SDIO buffer sizes that must be compliant! */
 		    for(i = 0; i < num_cryp_blocks; i++){
 #ifdef CONFIG_AES256_CBC_ESSIV
-                uint8_t curr_essiv_iv[16] = { 0 };
-                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
-                cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, DECRYPT);
+	                uint8_t curr_essiv_iv[16] = { 0 };
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
+DMA_RD_XFR_AGAIN:
+                	cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, DECRYPT);
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
-                uint8_t curr_essiv_iv[8] = { 0 };
-                cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
-                cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, DECRYPT);
+	                uint8_t curr_essiv_iv[8] = { 0 };
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
+DMA_RD_XFR_AGAIN:
+                	cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, DECRYPT);
 #else
 #error "No FDE algorithm has been selected ..."
 #endif
 #endif
-			    status_reg.dmaout_done = false;
-        	    cryp_do_dma((const uint8_t *)sdio_address, (const uint8_t *)usb_address, scsi_block_size, dma_in_desc, dma_out_desc);
-	            while (status_reg.dmaout_done == false){
-				    continue;
-			    }
-                cryp_wait_for_emtpy_fifos();
-			    usb_address  += scsi_block_size;
-			    sdio_address += scsi_block_size;
+	                status_reg.dmain_fifo_err = status_reg.dmain_dm_err = status_reg.dmain_tr_err = false;
+          	        status_reg.dmaout_fifo_err = status_reg.dmaout_dm_err = status_reg.dmaout_tr_err = false;
+                   	status_reg.dmaout_done = status_reg.dmain_done = false;
+	        	cryp_do_dma((const uint8_t *)sdio_address, (const uint8_t *)usb_address, scsi_block_size, dma_in_desc, dma_out_desc);
+		        while (status_reg.dmaout_done == false){
+                	        bool dma_error = status_reg.dmaout_fifo_err || status_reg.dmaout_dm_err || status_reg.dmaout_tr_err;
+                        	if(dma_error == true){
+#if CRYPTO_DEBUG
+                                	printf("CRYP DMA RD out error ... Trying again\n");
+#endif
+	                                cryp_flush_fifos();
+        	                        goto DMA_RD_XFR_AGAIN;
+                	        }
+                    		continue;
+			}
+	                cryp_wait_for_emtpy_fifos();
+			usb_address  += scsi_block_size;
+			sdio_address += scsi_block_size;
 		    }
 		    /****************************************************************************************/
 
