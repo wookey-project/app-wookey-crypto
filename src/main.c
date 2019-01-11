@@ -63,14 +63,9 @@ const char *tim = "tim";
 
 volatile uint32_t numipc = 0;
 
-volatile uint32_t num_dma_in_it = 0;
-volatile uint32_t num_dma_out_it = 0;
-
 bool sdio_ready = false;
 bool usb_ready = false;
 bool smart_ready = false;
-
-volatile status_reg_t status_reg = { 0 };
 
 enum shms {
     ID_USB = 0,
@@ -663,7 +658,6 @@ DMA_WR_XFR_AGAIN:
 #if CRYPTO_DEBUG
                     printf("[write] CRYP DMA has finished ! %d\n", shms_tab[ID_USB].size);
 #endif
-                    status_reg.dmaout_done = false;
                     // request DMA transfer to SDIO block device (IPC)
 
 
