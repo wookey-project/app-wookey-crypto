@@ -537,13 +537,15 @@ int _main(uint32_t task_id)
                     size = sizeof(struct sync_command_data);
 
                     sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
+
+                    /* for PIN, we give SCSI block size to get the correct size info */
+                    sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
 		    /* Override the SCSI block number */
                     /* FIXME: use a uint64_t to avoid overflows */
 		    ipc_sync_cmd_data.data.u32[1] = (ipc_sync_cmd_data.data.u32[1] / scsi_block_size) * ipc_sync_get_block_size.data.u32[0];
 
                     /* now that SDIO has returned, let's return to USB */
                     sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command_data), (char*)&ipc_sync_cmd_data);
-
                     break;
                 }
 
