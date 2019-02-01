@@ -264,10 +264,12 @@ int _main(uint32_t task_id)
         ipc_sync_cmd.magic = MAGIC_TASK_STATE_RESP;
         ipc_sync_cmd.state = SYNC_ACKNOWLEDGE;
 
-        do {
-            size = sizeof(struct sync_command);
-            ret = sys_ipc(IPC_SEND_SYNC, id, size, (char*)&ipc_sync_cmd);
-        } while (ret != SYS_E_DONE);
+        size = sizeof(struct sync_command);
+        ret = sys_ipc(IPC_SEND_SYNC, id, size, (char*)&ipc_sync_cmd);
+        if (ret != SYS_E_DONE) {
+            printf("sys_ipc(IPC_SEND_SYNC, %d) failed! Exiting...\n", id);
+            return 1;
+        }
 
         if (id == id_smart) { smart_ready = true; }
         if (id == id_usb)   { usb_ready = true; }
@@ -296,9 +298,11 @@ int _main(uint32_t task_id)
     ipc_sync_cmd.magic = MAGIC_CRYPTO_INJECT_CMD;
     ipc_sync_cmd.state = SYNC_READY;
 
-    do {
-      ret = sys_ipc(IPC_SEND_SYNC, id_smart, size, (char*)&ipc_sync_cmd);
-    } while (ret == SYS_E_BUSY);
+    ret = sys_ipc(IPC_SEND_SYNC, id_smart, size, (char*)&ipc_sync_cmd);
+    if (ret != SYS_E_DONE) {
+        printf("sys_ipc(IPC_SEND_SYNC, id_smart) failed! Exiting...\n");
+        return 1;
+    }
 
     id = id_smart;
     size = sizeof(struct sync_command_data);
@@ -331,9 +335,12 @@ int _main(uint32_t task_id)
     ipc_sync_cmd.state = SYNC_READY;
 
     /* First inform SDIO block that everything is ready... */
-    do {
-      ret = sys_ipc(IPC_SEND_SYNC, id_sdio, size, (char*)&ipc_sync_cmd);
-    } while (ret == SYS_E_BUSY);
+    ret = sys_ipc(IPC_SEND_SYNC, id_sdio, size, (char*)&ipc_sync_cmd);
+    if (ret != SYS_E_DONE) {
+        printf("sys_ipc(IPC_SEND_SYNC, id_sdio) failed! Exiting...\n");
+        return 1;
+    }
+
     printf("sending end_of_cryp to sdio done.\n");
 
 
@@ -342,9 +349,12 @@ int _main(uint32_t task_id)
     ipc_sync_cmd.state = SYNC_READY;
 
     /* First inform SDIO block that everything is ready... */
-    do {
-      ret = sys_ipc(IPC_SEND_SYNC, id_usb, size, (char*)&ipc_sync_cmd);
-    } while (ret == SYS_E_BUSY);
+    ret = sys_ipc(IPC_SEND_SYNC, id_usb, size, (char*)&ipc_sync_cmd);
+    if (ret != SYS_E_DONE) {
+        printf("sys_ipc(IPC_SEND_SYNC, id_sdio) failed! Exiting...\n");
+        return 1;
+    }
+
     printf("sending end_of_cryp to usb done.\n");
 
 
