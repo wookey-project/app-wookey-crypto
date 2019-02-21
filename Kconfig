@@ -5,6 +5,7 @@ config APP_CRYPTO
   depends on STM32F4
   default y
   select USR_LIB_WOOKEY
+  select USR_LIB_AES
   select USR_DRV_CRYP
   select APP_SDIO
   select APP_USB
@@ -40,7 +41,7 @@ config APP_CRYPTO_NUMSLOTS
     .text + .data in flash, and 8 (reduced to 7 with SHM) slots of 16kb in RAM.
     This choice has an impact on the total number of applications that can be loaded
     in the firmware.
-    
+
 config APP_CRYPTO_STACKSIZE
   int "Stack size"
   depends on APP_CRYPTO
@@ -49,7 +50,7 @@ config APP_CRYPTO_STACKSIZE
     Specify the application stack size, in bytes. By default, set to 8192
     (i.e. 8k). Depending on the number of slots required, and the usage,
     the stack can be bigger or smaller.
-    
+
 
 config APP_CRYPTO_SHM
   bool "CRYPTO requires shared memory to communicate with others"
@@ -202,7 +203,7 @@ choice
   config APP_CRYPTO_OPTIM_OS
     bool "Optimization for size, debug keeped"
 endchoice
-  
+
 config APP_CRYPTO_CFLAGS
   string
   default "-O1" if APP_CRYPTO_OPTIM_O1
