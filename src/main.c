@@ -17,6 +17,7 @@
 #include "wookey_ipc.h"
 #include "autoconf.h"
 
+
 /* Include the AES or TDES header (for CBC-ESSIV IV derivation) */
 
 #ifdef CONFIG_AES256_CBC_ESSIV
@@ -201,7 +202,8 @@ int _main(uint32_t task_id)
 
     strncpy(ipc_buf, inject_order, 6);
 #ifdef CONFIG_APP_CRYPTO_USE_GETCYCLES
-    device_t dev2 = { 0 };
+    device_t dev2;
+    memset(&dev2, 0, sizeof(device_t));
     int      dev_descriptor = 0;
 #endif
     e_syscall_ret ret = 0;
