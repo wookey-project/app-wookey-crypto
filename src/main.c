@@ -348,25 +348,48 @@ int _main(uint32_t task_id)
 
 
     printf("waiting for end_of_cryp response from USB & SDIO\n");
-    for (uint8_t i = 0; i < 2; ++i) {
-        id = ANY_APP;
-        size = sizeof(struct sync_command);
 
-        ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
-        if (ret == SYS_E_DONE) {
-            if (id == id_usb) {
-                if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
-                        && ipc_sync_cmd.state == SYNC_READY) {
-                    printf("USB module is ready\n");
-                }
-            } else if (id == id_sdio) {
+    id = ANY_APP;
+    size = sizeof(struct sync_command);
+
+/**
+ * FIXME: this construction is not clean and should be replaced by the following:
+ * wait for USB IPC, wait for SDIO IPC, and acknowledge both.
+ * The acknowledge is required in order to avoid the first task sending the IPC to
+ * send the DMA_SHM request too soon. Acknowledging would freeze both the tasks while
+ * both of them are not ready.
+ */
+
+    ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+    if (ret == SYS_E_DONE) {
+        if (id == id_usb) {
+            if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
+                    && ipc_sync_cmd.state == SYNC_READY) {
+                printf("USB module is ready\n");
+                /* now we wait for SDIO...*/
+                id = id_sdio;
+                size = sizeof(struct sync_command);
+                ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
                 if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
                         && ipc_sync_cmd.state == SYNC_READY) {
                     printf("SDIO module is ready\n");
                 }
-            } else {
-                    printf("received msg from id %d ??\n", id);
             }
+        } else if (id == id_sdio) {
+            if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
+                    && ipc_sync_cmd.state == SYNC_READY) {
+                printf("SDIO module is ready\n");
+                /* now we wait for SDIO...*/
+                id = id_usb;
+                size = sizeof(struct sync_command);
+                ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd);
+                if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_RESP
+                        && ipc_sync_cmd.state == SYNC_READY) {
+                    printf("USB module is ready\n");
+                }
+            }
+        } else {
+            printf("received msg from id %d ??\n", id);
         }
     }
 
@@ -374,17 +397,12 @@ int _main(uint32_t task_id)
     /*******************************************
      * Syncrhonizing DMA SHM buffer address with USB and SDIO, through IPC
      ******************************************/
-    struct dmashm_info {
-        uint32_t addr;
-        uint16_t size;
-    };
-
     struct dmashm_info shm_info;
 
     // 2 receptions are waited: one from usb, one from sdio, in whatever order
     for (uint8_t i = 0; i < 2; ++i) {
         id = ANY_APP;
-        size = sizeof(struct dmashm_info);
+        size = sizeof(shm_info);
 
         ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&shm_info);
         if (ret == SYS_E_DONE) {
