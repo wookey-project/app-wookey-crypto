@@ -26,7 +26,7 @@ CFLAGS += $(DEBUG_CFLAGS)
 CFLAGS += -I$(PROJ_FILES)
 CFLAGS += -Isrc/ -Iinc/
 CFLAGS += $(APPS_CFLAGS)
-CFLAGS += -MMD -MP
+CFLAGS += -MMD -MP -O3
 
 LDFLAGS += -fno-builtin -nostdlib -nostartfiles $(AFLAGS_GCC)
 #-fno-builtin -nostdlib
