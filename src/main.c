@@ -421,6 +421,12 @@ int _main(uint32_t task_id)
             }
         }
     }
+    /* now that both tasks have sent their SHM, we can acknowledge both of them,
+     * starting with SDIO (the backend) and finishing with USB (the frontend) */
+    ipc_sync_cmd.magic = MAGIC_TASK_STATE_RESP;
+    ipc_sync_cmd.state = SYNC_ACKNOWLEDGE;
+    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
+    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command), (char*)&ipc_sync_cmd);
 
 
     /*******************************************
