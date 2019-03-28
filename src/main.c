@@ -11,6 +11,7 @@
 #include "api/nostd.h"
 #include "api/string.h"
 #include "api/regutils.h"
+#include "api/arpa/inet.h"
 #include "libcryp.h"
 //#include "dma_regs.h"
 #include "main.h"
@@ -119,7 +120,7 @@ int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int 
 #ifdef CONFIG_AES256_CBC_ESSIV
         uint8_t sector_number_buff[16] = { 0 };
         /* Encode the sector number in big endian 16 bytes */
-        uint32_t big_endian_sector_number = to_big32(sector_number);
+        uint32_t big_endian_sector_number = htonl(sector_number);
         sector_number_buff[0] = (big_endian_sector_number >>  0) & 0xff;
         sector_number_buff[1] = (big_endian_sector_number >>  8) & 0xff;
         sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
@@ -141,7 +142,7 @@ int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int 
 #ifdef CONFIG_TDES_CBC_ESSIV
         uint8_t sector_number_buff[8] = { 0 };
         /* Encode the sector number in big endian 8 bytes */
-        uint32_t big_endian_sector_number = to_big32(sector_number);
+        uint32_t big_endian_sector_number = htonl(sector_number);
         sector_number_buff[0] = (big_endian_sector_number >>  0) & 0xff;
         sector_number_buff[1] = (big_endian_sector_number >>  8) & 0xff;
         sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
