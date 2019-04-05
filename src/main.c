@@ -626,9 +626,15 @@ int _main(uint32_t task_id)
                         ipc_sync_cmd_data.data.u8[0] = ENCRYPT;
                         ipc_sync_cmd_data.data_size = (uint8_t)1;
 
-                        sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd_data);
+                        ret = sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(struct sync_command), (char*)&ipc_sync_cmd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf("%s: unable to send ipc to smart! ret=%d\n", __func__, ret);
+                        }
 
                         sys_ipc(IPC_RECV_SYNC, &id, &size, (char*)&ipc_sync_cmd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf("%s: unable to receive ipc from smart! ret=%d\n", __func__, ret);
+                        }
 #if CRYPTO_DEBUG
                         printf("===> Key reinjection done!\n");
 #endif
@@ -692,7 +698,11 @@ DMA_WR_XFR_AGAIN:
                     // request DMA transfer to SDIO block device (IPC)
 
 
-                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&sdio_dataplane_command_rw);
+                    ret = sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&sdio_dataplane_command_rw);
+
+                    if (ret != SYS_E_DONE) {
+                        printf("%s: unable to send ipc from sdio! ret=%d\n", __func__, ret);
+                    }
 
                     // wait for SDIO task acknowledge (IPC)
                     sinker = id_sdio;
@@ -700,13 +710,21 @@ DMA_WR_XFR_AGAIN:
 
                     ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
 
+                    if (ret != SYS_E_DONE) {
+                        printf("%s: unable to receive ipc from sdio! ret=%d\n", __func__, ret);
+                    }
+
 #if CRYPTO_DEBUG
                     printf("[write] received ipc from sdio (%d)\n", sinker);
 #endif
                     // set ack magic for write ack
                     dataplane_command_ack.magic = MAGIC_DATA_WR_DMA_ACK;
                     // acknowledge to USB: data has been written to disk (IPC)
-                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
+                    ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
+
+                    if (ret != SYS_E_DONE) {
+                        printf("%s: unable to send ipc back to usb! ret=%d\n", __func__, ret);
+                    }
 
                     break;
                 }
@@ -746,7 +764,11 @@ DMA_WR_XFR_AGAIN:
                     }
                     sdio_dataplane_command_rw.sector_address = (uint32_t)tmp;
 
-                    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&sdio_dataplane_command_rw);
+                    ret = sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct dataplane_command), (const char*)&sdio_dataplane_command_rw);
+
+                    if (ret != SYS_E_DONE) {
+                        printf("%s: unable to send ipc to sdio! ret=%d\n", __func__, ret);
+                    }
 
                     // wait for SDIO task acknowledge (IPC)
                     sinker = id_sdio;
@@ -754,6 +776,9 @@ DMA_WR_XFR_AGAIN:
 
                     ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char*)&dataplane_command_ack);
 
+                    if (ret != SYS_E_DONE) {
+                        printf("%s: unable to receive ipc from sdio! ret=%d\n", __func__, ret);
+                    }
 #if CRYPTO_DEBUG
                     printf("[read] received ipc from sdio (%d): data loaded\n", sinker);
 #endif
@@ -829,8 +854,11 @@ DMA_RD_XFR_AGAIN:
                     dataplane_command_ack.magic = MAGIC_DATA_RD_DMA_ACK;
 
                     // acknowledge to USB: data has been written to disk (IPC)
-                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
+                    ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct dataplane_command), (const char*)&dataplane_command_ack);
 
+                    if (ret != SYS_E_DONE) {
+                        printf("%s: unable to send ipc to usb! ret=%d\n", __func__, ret);
+                    }
                     break;
 
                 }
