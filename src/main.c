@@ -895,6 +895,16 @@ DMA_RD_XFR_AGAIN:
                     break;
                 }
 
+	    /* Reboot request */
+            case MAGIC_REBOOT_REQUEST:
+                {
+                    if (sinker == id_usb) {
+                      ret = sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(t_ipc_command), (const char*)&ipc_mainloop_cmd);
+                    }
+                    break;
+                }
+
+
             default:
                 {
                     /***************************************************
