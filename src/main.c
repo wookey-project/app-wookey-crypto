@@ -132,7 +132,7 @@ int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int 
         }
 
         aes_context aes_context;
-        if(aes_init(&aes_context, hkey, AES256, NULL, ECB, AES_ENCRYPT, AES_SOFT_MBEDTLS, NULL, NULL, -1, -1)){
+        if(aes_init(&aes_context, hkey, AES256, NULL, ECB, AES_ENCRYPT, AES_SOFT_UNMASKED, NULL, NULL, -1, -1)){
                 goto err;
         }
         if(aes_exec(&aes_context, sector_number_buff, iv, iv_len, -1, -1)){
