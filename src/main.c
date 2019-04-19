@@ -103,19 +103,34 @@ uint8_t id_benchlog = 0;
 uint32_t dma_in_desc;
 uint32_t dma_out_desc;
 
-uint8_t master_key_hash[32] = {0};
-
+static unsigned char CBC_ESSIV_h_key[32] = { 0 };
+static bool CBC_ESSIV_h_key_initialized = false;
+static bool CBC_ESSIV_ctx_initialized = false;
+#ifdef CONFIG_AES256_CBC_ESSIV
+static aes_context CBC_ESSIV_ctx;
+#else
+#ifdef CONFIG_TDES_CBC_ESSIV
+static des3_context CBC_ESSIV_ctx;
+#else
+#error "No FDE algorithm has been selected ..."
+#endif
+#endif
 
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
  * The diversification varies depending on the underlying block cipher.
  */
-int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int hkey_len, uint8_t *iv, unsigned int iv_len){
+static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *iv, unsigned int iv_len){
         /* The key hash is not really a secret, we can safely use an unprotected (and faster) AES/TDES algorithm.
          *
          * NOTE: obviously, we cannot use accelerated AES/TDES here since it is already configured with the master key
          * to perform blocks encryption/decryption!
          */
+
+	/* Sanity check: the key hash must be initialized */
+	if(CBC_ESSIV_h_key_initialized == false){
+		goto err;
+	}
 
 #ifdef CONFIG_AES256_CBC_ESSIV
         uint8_t sector_number_buff[16] = { 0 };
@@ -127,15 +142,16 @@ int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int 
         sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
 
         /* Sanity checks */
-        if((hkey_len != 32) || (iv_len != 16)){
+        if(iv_len != 16){
                 goto err;
         }
-
-        aes_context aes_context;
-        if(aes_init(&aes_context, hkey, AES256, NULL, ECB, AES_ENCRYPT, AES_SOFT_UNMASKED, NULL, NULL, -1, -1)){
-                goto err;
-        }
-        if(aes_exec(&aes_context, sector_number_buff, iv, iv_len, -1, -1)){
+	if(CBC_ESSIV_ctx_initialized == false){
+	        if(aes_init(&CBC_ESSIV_ctx, CBC_ESSIV_h_key, AES256, NULL, ECB, AES_ENCRYPT, AES_SOFT_UNMASKED, NULL, NULL, -1, -1)){
+        	        goto err;
+	        }
+		CBC_ESSIV_ctx_initialized = true;
+	}
+        if(aes_exec(&CBC_ESSIV_ctx, sector_number_buff, iv, iv_len, -1, -1)){
             goto err;
         }
 #else
@@ -148,13 +164,15 @@ int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t *hkey, unsigned int 
         sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
         sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
 
-        des3_context des3_context;
         /* Sanity checks */
-        if((hkey_len != 24) || (iv_len != 8)){
+        if(iv_len != 8){
                 goto err;
         }
-        des3_set_3keys(&des3_context, &(hkey[0]), &(hkey[8]), &(hkey[16]));
-        des3_encrypt(&des3_context, sector_number_buff, iv);
+	if(CBC_ESSIV_ctx_initialized == false){
+        	des3_set_3keys(&CBC_ESSIV_ctx, &(CBC_ESSIV_h_key[0]), &(CBC_ESSIV_h_key[8]), &(CBC_ESSIV_h_key[16]));
+		CBC_ESSIV_ctx_initialized = true;
+	}
+        des3_encrypt(&CBC_ESSIV_ctx, sector_number_buff, iv);
 
 #else
 #error "No FDE algorithm has been selected ..."
@@ -280,7 +298,6 @@ int _main(uint32_t task_id)
      *******************************************/
 
 
-	unsigned char CBC_ESSIV_h_key[32] = {0};
     /* Then Syncrhonize with crypto */
     size = sizeof(struct sync_command);
 
@@ -303,7 +320,7 @@ int _main(uint32_t task_id)
         && ipc_sync_cmd_data.state == SYNC_DONE) {
         printf("key injection done from smart. Hash received.\n");
         memcpy(CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8, ipc_sync_cmd_data.data_size);
-
+        CBC_ESSIV_h_key_initialized = true;
 #if CONFIG_SMARTCARD_DEBUG
         printf("hash received:\n");
         hexdump(CBC_ESSIV_h_key, 32);
@@ -658,13 +675,13 @@ int _main(uint32_t task_id)
 		    for(i = 0; i < num_cryp_blocks; i++){
 #ifdef CONFIG_AES256_CBC_ESSIV
 	                uint8_t curr_essiv_iv[16] = { 0 };
-        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), curr_essiv_iv, 16);
 DMA_WR_XFR_AGAIN:
                 	cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, ENCRYPT);
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
 	                uint8_t curr_essiv_iv[8] = { 0 };
-        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), curr_essiv_iv, 8);
 DMA_WR_XFR_AGAIN:
                 	cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, ENCRYPT);
 #else
@@ -812,13 +829,13 @@ DMA_WR_XFR_AGAIN:
 		    for(i = 0; i < num_cryp_blocks; i++){
 #ifdef CONFIG_AES256_CBC_ESSIV
 	                uint8_t curr_essiv_iv[16] = { 0 };
-        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 32, curr_essiv_iv, 16);
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), curr_essiv_iv, 16);
 DMA_RD_XFR_AGAIN:
                 	cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC, DECRYPT);
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
 	                uint8_t curr_essiv_iv[8] = { 0 };
-        	        cbc_essiv_iv_derivation((scsi_sector_address + i), CBC_ESSIV_h_key, 24, curr_essiv_iv, 8);
+        	        cbc_essiv_iv_derivation((scsi_sector_address + i), curr_essiv_iv, 8);
 DMA_RD_XFR_AGAIN:
                 	cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC, DECRYPT);
 #else
