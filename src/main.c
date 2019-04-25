@@ -244,7 +244,7 @@ int _main(uint32_t task_id)
     ret = sys_init(INIT_GETTASKID, "benchlog", &id_benchlog);
     printf("benchlog is task %x !\n", id_benchlog);
 
-    cryp_early_init(true, CRYP_MAP_AUTO, CRYP_USER, CRYP_PRODMODE, (int*) &dma_in_desc, (int*) &dma_out_desc);
+    cryp_early_init(true, CRYP_MAP_AUTO, CRYP_USER, (int*) &dma_in_desc, (int*) &dma_out_desc);
 
     printf("set init as done\n");
     ret = sys_init(INIT_DONE);
