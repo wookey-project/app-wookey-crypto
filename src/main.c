@@ -178,11 +178,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
         goto err;
     }
     if (CBC_ESSIV_ctx_initialized == false) {
-        des3_set_3keys(&CBC_ESSIV_ctx, &(CBC_ESSIV_h_key[0]),
-                       &(CBC_ESSIV_h_key[8]), &(CBC_ESSIV_h_key[16]));
+        des3_set_keys(&CBC_ESSIV_ctx, &(CBC_ESSIV_h_key[0]),
+                       &(CBC_ESSIV_h_key[8]), &(CBC_ESSIV_h_key[16]), DES_ENCRYPTION);
         CBC_ESSIV_ctx_initialized = true;
     }
-    des3_encrypt(&CBC_ESSIV_ctx, sector_number_buff, iv);
+    des3_exec(&CBC_ESSIV_ctx, sector_number_buff, iv);
 
 #else
 #error "No FDE algorithm has been selected ..."
