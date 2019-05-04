@@ -1,5 +1,5 @@
 #include "tdes.h"
-//#include "libc/types.h"
+#include "libc/types.h"
 
 /* This is a very straightforward and basic implementation of DES and T-DES */
 
