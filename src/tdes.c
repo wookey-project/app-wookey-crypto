@@ -3,6 +3,24 @@
 
 /* This is a very straightforward and basic implementation of DES and T-DES */
 
+/* platform-independant 32-bit integer manipulation macros */
+
+#define GET_UINT32(n,b,i)                       \
+{                                               \
+    (n) = ( (unsigned int) (b)[(i)    ] << 24 )       \
+        | ( (unsigned int) (b)[(i) + 1] << 16 )       \
+        | ( (unsigned int) (b)[(i) + 2] <<  8 )       \
+        | ( (unsigned int) (b)[(i) + 3]       );      \
+}
+
+#define PUT_UINT32(n,b,i)                       \
+{                                               \
+    (b)[(i)    ] = (unsigned char) ( (n) >> 24 );       \
+    (b)[(i) + 1] = (unsigned char) ( (n) >> 16 );       \
+    (b)[(i) + 2] = (unsigned char) ( (n) >>  8 );       \
+    (b)[(i) + 3] = (unsigned char) ( (n)       );       \
+}
+
 /* DES 8 S-Boxes */
 static const unsigned int SB[8][64] = {
   {
@@ -168,25 +186,6 @@ static const unsigned int RH[16] =
     0x00000001, 0x01000001, 0x00010001, 0x01010001,
     0x00000101, 0x01000101, 0x00010101, 0x01010101,
 };
-
-
-/* platform-independant 32-bit integer manipulation macros */
-
-#define GET_UINT32(n,b,i)                       \
-{                                               \
-    (n) = ( (unsigned int) (b)[(i)    ] << 24 )       \
-        | ( (unsigned int) (b)[(i) + 1] << 16 )       \
-        | ( (unsigned int) (b)[(i) + 2] <<  8 )       \
-        | ( (unsigned int) (b)[(i) + 3]       );      \
-}
-
-#define PUT_UINT32(n,b,i)                       \
-{                                               \
-    (b)[(i)    ] = (unsigned char) ( (n) >> 24 );       \
-    (b)[(i) + 1] = (unsigned char) ( (n) >> 16 );       \
-    (b)[(i) + 2] = (unsigned char) ( (n) >>  8 );       \
-    (b)[(i) + 3] = (unsigned char) ( (n)       );       \
-}
 
 /* DES Initial Permutation (IP) */
 static inline void des_ip(unsigned int L[1], unsigned int R[1])
