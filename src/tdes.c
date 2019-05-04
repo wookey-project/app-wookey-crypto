@@ -269,7 +269,7 @@ int des_set_key(des_context *ctx, const unsigned char k[8], des_direction dir)
 	C &= 0x0FFFFFFF;
 	D &= 0x0FFFFFFF;
 
-	/* calculate subkeys */
+	/* Compute the subkeys */
 	for( i = 0; i < 16; i++ ){
 		unsigned int k1, k2;
 		if((i < 2) || (i == 8) || (i == 15)){
