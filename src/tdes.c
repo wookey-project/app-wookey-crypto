@@ -1,5 +1,5 @@
 #include "tdes.h"
-#include "libc/types.h"
+//#include "libc/types.h"
 
 /* This is a very straightforward and basic implementation of DES and T-DES */
 
@@ -451,49 +451,3 @@ int des3_exec(const des3_context *ctx, const unsigned char input[8], unsigned ch
 err:
 	return -1;
 }
-
-#if 0
-int main(){
-	unsigned char in[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
-	unsigned char out[8];
-	unsigned char out2[8];
-	unsigned char k[8] = {0x75, 0x28, 0x78, 0x39, 0x74, 0x93, 0xCB, 0x70};
-	unsigned char k2[8] = {0x34, 0xE5, 0x46, 0x7B, 0x95, 0x94, 0x40, 0x6D};
-	unsigned char k3[8] = {0x0A, 0x20, 0x16, 0xFE, 0xF3, 0x62, 0x9F, 0x94};
-	//unsigned char iv[8] = {0x78, 0xE9, 0x5A, 0xBF, 0x0B, 0x8E, 0xE2, 0xC0};
-	unsigned char iv[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-	unsigned char in2[8];
-
-	des_context ctx;
-	des_set_key(&ctx, k, DES_ENCRYPTION);
-	des_exec(&ctx, in, out);
-
-
-	unsigned int i;
-	for(i = 0; i < 8; i++){
-		printf("%02x", out[i]);
-	}
-	printf("\n");
-
-	des_set_key(&ctx, k, DES_DECRYPTION);
-	des_exec(&ctx, out, out2);
-
-	for(i = 0; i < 8; i++){
-		printf("%02x", out2[i]);
-	}
-	printf("\n");
-
-	for(i = 0; i < 8; i++){
-		in2[i] = in[i] ^ iv[i];
-	}
-	des3_context ctx3;
-	des3_set_keys(&ctx3, k, k2, k3, DES_ENCRYPTION);
-	des3_exec(&ctx3, in2, out);
-	for(i = 0; i < 8; i++){
-		printf("%02x", out[i]);
-	}
-	printf("\n");
-
-	return 0;
-}
-#endif
