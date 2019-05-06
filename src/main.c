@@ -27,7 +27,7 @@
 # include "aes.h"
 #endif
 #ifdef CONFIG_TDES_CBC_ESSIV
-# include "tdes.h"
+# include "libdes.h"
 #endif
 
 /* The SCSI block size that has been set in the configuration */

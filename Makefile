@@ -41,6 +41,10 @@ LDFLAGS += -L$(APP_BUILD_DIR) $(EXTRA_LDFLAGS)
 # project's library you whish to use...
 LD_LIBS += -lcryp -laes -lstd
 
+ifeq (y,$(CONFIG_TDES_CBC_ESSIV))
+LD_LIBS += -ldes
+endif
+
 ###################################################################
 # okay let's list our source files and generated files now
 ###################################################################
@@ -73,6 +77,10 @@ TODEL_DISTCLEAN += $(APP_BUILD_DIR)
 ## library dependencies
 LIBDEP := $(BUILD_DIR)/libs/libstd/libstd.a \
           $(BUILD_DIR)/libs/libstd/libaes.a
+
+ifeq (y,$(CONFIG_TDES_CBC_ESSIV))
+LIBDEP += $(BUILD_DIR)/libs/libdes/libdes.a
+endif
 
 libdep: $(LIBDEP)
 

@@ -6,6 +6,7 @@ config APP_CRYPTO
   default y
   select USR_LIB_WOOKEY
   select USR_LIB_AES
+  select USR_LIB_DES
   select USR_DRV_CRYP
   select APP_SDIO
   select APP_USB
