@@ -334,6 +334,10 @@ int _main(uint32_t task_id)
     size = sizeof(struct sync_command_data);
 
     ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char *) &ipc_sync_cmd_data);
+    if (ret != SYS_E_DONE) {
+        printf("sys_ipc(IPC_RECV_SYNC) failed! Exiting...\n");
+        return 1;
+    }
 
     if (ipc_sync_cmd_data.magic == MAGIC_CRYPTO_INJECT_RESP
         && ipc_sync_cmd_data.state == SYNC_DONE) {
@@ -419,6 +423,9 @@ int _main(uint32_t task_id)
                 i--;
             }
         }
+        else{
+            return 1;
+        }
     }
 
     /* now that both tasks have acknowledge their initialization phase, we can
@@ -463,6 +470,9 @@ int _main(uint32_t task_id)
             } else {
                 printf("received msg from id %d ??\n", id);
             }
+        }
+        else{
+            return 1;
         }
     }
     /* now that both tasks have sent their SHM, we can acknowledge both of them,
@@ -527,7 +537,10 @@ int _main(uint32_t task_id)
         ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
 
-        sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char *) &ipc_mainloop_cmd);
+        ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char *) &ipc_mainloop_cmd);
+        if(ret != SYS_E_DONE) {
+            goto err;
+        }
 
         switch (ipc_mainloop_cmd.magic) {
 
@@ -559,9 +572,11 @@ int _main(uint32_t task_id)
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
 
-                    sys_ipc(IPC_RECV_SYNC, &id, &size,
+                    ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_cmd_data);
-
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
                     /* Save the block sizes (SDIO and SCSI) since we will need it later */
                     sdio_block_size = ipc_sync_cmd_data.data.u32[0];
                     /* Override the SCSI block size and number */
@@ -573,9 +588,12 @@ int _main(uint32_t task_id)
 
 
                     /* now that SDIO has returned, let's return to USB */
-                    sys_ipc(IPC_SEND_SYNC, id_usb,
+                    ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
 
                     break;
                 }
@@ -595,13 +613,20 @@ int _main(uint32_t task_id)
                     struct sync_command_data ipc_sync_get_block_size = { 0 };
                     ipc_sync_get_block_size.magic =
                         MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD;
-                    sys_ipc(IPC_SEND_SYNC, id_sdio,
+                    ret = sys_ipc(IPC_SEND_SYNC, id_sdio,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_get_block_size);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
+
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
-                    sys_ipc(IPC_RECV_SYNC, &id, &size,
+                    ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_get_block_size);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
 
                     sdio_block_size = ipc_sync_cmd_data.data.u32[0];
 
@@ -615,20 +640,30 @@ int _main(uint32_t task_id)
                      * to clean the struct content to avoid any data leak before transfering the content
                      * to sdio task, behavioring like a filter.
                      */
-                    sys_ipc(IPC_SEND_SYNC, id_sdio,
+                    ret = sys_ipc(IPC_SEND_SYNC, id_sdio,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
 
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
 
-                    sys_ipc(IPC_RECV_SYNC, &id, &size,
+                    ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_cmd_data);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
 
                     /* for PIN, we give SCSI block size to get the correct size info */
-                    sys_ipc(IPC_SEND_SYNC, id_smart,
+                    ret = sys_ipc(IPC_SEND_SYNC, id_smart,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
+
                     /* Override the SCSI block number */
                     /* FIXME: use a uint64_t to avoid overflows */
                     ipc_sync_cmd_data.data.u32[1] =
@@ -636,9 +671,13 @@ int _main(uint32_t task_id)
                         ipc_sync_get_block_size.data.u32[0];
 
                     /* now that SDIO has returned, let's return to USB */
-                    sys_ipc(IPC_SEND_SYNC, id_usb,
+                    ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
+
                     break;
                 }
 
@@ -1007,8 +1046,12 @@ int _main(uint32_t task_id)
                         continue;
                     }
 
-                    sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(t_ipc_command),
+                    ret = sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(t_ipc_command),
                             (const char *) &ipc_mainloop_cmd);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
+
                     break;
                 }
 
@@ -1020,6 +1063,9 @@ int _main(uint32_t task_id)
                             sys_ipc(IPC_SEND_SYNC, id_smart,
                                     sizeof(t_ipc_command),
                                     (const char *) &ipc_mainloop_cmd);
+                        if(ret != SYS_E_DONE) {
+                           goto err;
+                        }
                     }
                     break;
                 }
@@ -1035,8 +1081,12 @@ int _main(uint32_t task_id)
                     ipc_mainloop_cmd.magic = MAGIC_INVALID;
 
                     // acknowledge to USB: data has been written to disk (IPC)
-                    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(t_ipc_command),
+                    ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(t_ipc_command),
                             (const char *) &ipc_mainloop_cmd);
+                    if(ret != SYS_E_DONE) {
+                       goto err;
+                    }
+
                     break;
 
                 }
