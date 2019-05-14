@@ -1049,7 +1049,6 @@ int _main(uint32_t task_id)
                             ("ejected storage event command only allowed from SDIO app\n");
                         continue;
                     }
-                    printf("reset from crypto\n");
                     ret = sys_ipc(IPC_SEND_SYNC, id_smart, sizeof(t_ipc_command),
                             (const char *) &ipc_mainloop_cmd);
                     if(ret != SYS_E_DONE) {
@@ -1080,10 +1079,12 @@ int _main(uint32_t task_id)
                     /***************************************************
                      * Invalid request. Returning invalid to sender
                      **************************************************/
-                    if(sinker == id_usb)
+                    if(sinker == id_usb) {
                         printf("invalid request from USB %x!\n",ipc_mainloop_cmd.magic);
-                    if(sinker == id_sdio)
+          	    }
+                    if(sinker == id_sdio) {
                        printf("invalid request from SDIO %x!\n",ipc_mainloop_cmd.magic);
+                    }
                     // returning INVALID magic to USB
                     ipc_mainloop_cmd.magic = MAGIC_INVALID;
 
