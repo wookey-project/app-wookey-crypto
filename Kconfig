@@ -194,6 +194,11 @@ endmenu
 
 endmenu
 
+config APP_CRYPTO_DOMAIN
+    depends on APP_CRYPTO
+    int "CRYPTO app security domain"
+    default 0
+
 choice
   prompt "Crypto app specific optimization flags"
   default APP_CRYPTO_OPTIM_NONE
