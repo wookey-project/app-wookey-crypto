@@ -671,14 +671,19 @@ int _main(uint32_t task_id)
                     ipc_sync_cmd_data.data.u32[0] = scsi_block_size;
 
 
-                    /* now that SDIO has returned, let's return to USB */
+                    /* now that SDIO has returned,... */
+#ifdef CONFIG_AES256_CBC_ESSIV
+                    /* 1) update the initial IV using the card serial id */
+#endif
+                    /* 2) return usefull infos to USB (without serial and
+                     * any potential other leak) */
+                    memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
                     if(ret != SYS_E_DONE) {
                        goto err;
                     }
-
                     break;
                 }
 
@@ -755,6 +760,7 @@ int _main(uint32_t task_id)
                         ipc_sync_get_block_size.data.u32[0];
 
                     /* now that SDIO has returned, let's return to USB */
+                    memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
