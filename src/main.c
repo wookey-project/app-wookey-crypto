@@ -152,6 +152,17 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     sha256_final(&sha256_ctx, sd_serial_digest);
 
 #ifdef CONFIG_AES256_CBC_ESSIV
+    /*
+     * The AES ESSIV IV before encryption is split using the following
+     * scheme:
+     *  
+     * <------ 32 bits -----------><-------- 96 bits ----------->
+     * [ sector number big endian | 96 bits MSB of SHA-256(CID) ]
+     * <----------------------- 128 bits ----------------------->
+     * 
+     * with "sector number big endian" being the sector number encoded
+     * on 32 bits big endian, and CID being the SD unique serial number.
+     */
     uint8_t sector_number_buff[16] = { 0 };
     /* Encode the sector number in big endian 16 bytes */
     uint32_t big_endian_sector_number = htonl(sector_number);
@@ -160,8 +171,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     sector_number_buff[1] = (big_endian_sector_number >> 8) & 0xff;
     sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
     sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
-    /* Copy bytes of the SD serial hash */
-    memcpy(sector_number_buff+4, sd_serial_digest, sizeof(sector_number_buff)-4);
+    /* Copy bytes of the SD serial hash.
+     * NOTE: only the 96 bits MSB from the SD serial digest are copied to the
+     * 96 bits LSB of the IV.
+     */
+    memcpy(&(sector_number_buff[4]), sd_serial_digest, sizeof(sector_number_buff)-4);
 
     /* Sanity checks */
     if (iv_len != 16) {
@@ -180,6 +194,17 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     }
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
+    /*
+     * The TDES ESSIV IV before encryption is split using the following
+     * scheme:
+     *  
+     * <------ 32 bits -----------><-------- 32 bits ----------->
+     * [ sector number big endian | 32 bits MSB of SHA-256(CID) ]
+     * <----------------------- 64 bits ------------------------>
+     * 
+     * with "sector number big endian" being the sector number encoded
+     * on 32 bits big endian, and CID being the SD unique serial number.
+     */
     uint8_t sector_number_buff[8] = { 0 };
     /* Encode the sector number in big endian 8 bytes */
     uint32_t big_endian_sector_number = htonl(sector_number);
@@ -188,8 +213,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     sector_number_buff[1] = (big_endian_sector_number >> 8) & 0xff;
     sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
     sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
-    /* Copy bytes of the SD serial hash */
-    memcpy(sector_number_buff+4, sd_serial_digest, sizeof(sector_number_buff)-4);
+    /* Copy bytes of the SD serial hash.
+     * NOTE: only the 32 bits MSB from the SD serial digest are copied to the
+     * 32 bits LSB of the IV.
+     */
+    memcpy(&(sector_number_buff[4]), sd_serial_digest, sizeof(sector_number_buff)-4);
 
     /* Sanity checks */
     if (iv_len != 8) {
