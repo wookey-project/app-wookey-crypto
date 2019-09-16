@@ -16,10 +16,11 @@
 //#include "dma_regs.h"
 #include "main.h"
 #include "handlers.h"
-#include "aes.h"
 #include "wookey_ipc.h"
 #include "autoconf.h"
 
+/* Include hash header for CBC-ESSIV IV derivation */
+#include "libsig.h"
 
 /* Include the AES or TDES header (for CBC-ESSIV IV derivation) */
 
@@ -120,11 +121,16 @@ static des3_context CBC_ESSIV_ctx;
 #endif
 #endif
 
+/* This is the global buffer holding the SD card unique serial used for
+ * IV derivation
+ */
+uint8_t sd_serial[6*sizeof(uint32_t)] = { 0 };
+
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
  * The diversification varies depending on the underlying block cipher.
  */
-static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
+static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_serial, unsigned int sd_unique_serial_len, uint8_t * iv,
                                    unsigned int iv_len)
 {
     /* The key hash is not really a secret, we can safely use an unprotected (and faster) AES/TDES algorithm.
@@ -137,6 +143,13 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     if (CBC_ESSIV_h_key_initialized == false) {
         goto err;
     }
+    /* Handle the SD unique serial derivation for the IV */
+    uint8_t sd_serial_digest[SHA256_DIGEST_SIZE];
+    sha256_context sha256_ctx;
+    sha256_init(&sha256_ctx);
+    sha256_update(&sha256_ctx, sd_unique_serial, sd_unique_serial_len);
+    sha256_final(&sha256_ctx, sd_serial_digest);
+
 #ifdef CONFIG_AES256_CBC_ESSIV
     uint8_t sector_number_buff[16] = { 0 };
     /* Encode the sector number in big endian 16 bytes */
@@ -146,6 +159,8 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     sector_number_buff[1] = (big_endian_sector_number >> 8) & 0xff;
     sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
     sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
+    /* Copy bytes of the SD serial hash */
+    memcpy(sector_number_buff+4, sd_serial_digest, sizeof(sector_number_buff)-4);
 
     /* Sanity checks */
     if (iv_len != 16) {
@@ -172,6 +187,8 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     sector_number_buff[1] = (big_endian_sector_number >> 8) & 0xff;
     sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
     sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
+    /* Copy bytes of the SD serial hash */
+    memcpy(sector_number_buff+4, sd_serial_digest, sizeof(sector_number_buff)-4);
 
     /* Sanity checks */
     if (iv_len != 8) {
@@ -672,11 +689,13 @@ int _main(uint32_t task_id)
 
 
                     /* now that SDIO has returned,... */
-#ifdef CONFIG_AES256_CBC_ESSIV
-                    /* 1) update the initial IV using the card serial id */
-#endif
+                    /* 1) update our sd_serial global buffer using the card serial id */
                     /* 2) return usefull infos to USB (without serial and
                      * any potential other leak) */
+                    if(sizeof(sd_serial) < (6*sizeof(uint32_t))){
+                        goto err;
+		    }
+		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 6*sizeof(uint32_t));
                     memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
@@ -870,7 +889,7 @@ int _main(uint32_t task_id)
                     for (i = 0; i < num_cryp_blocks; i++) {
 #ifdef CONFIG_AES256_CBC_ESSIV
                         uint8_t curr_essiv_iv[16] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 16);
  DMA_WR_XFR_AGAIN:
                         cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC,
@@ -878,7 +897,7 @@ int _main(uint32_t task_id)
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
                         uint8_t curr_essiv_iv[8] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 8);
  DMA_WR_XFR_AGAIN:
                         cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC,
@@ -1068,7 +1087,7 @@ int _main(uint32_t task_id)
                     for (i = 0; i < num_cryp_blocks; i++) {
 #ifdef CONFIG_AES256_CBC_ESSIV
                         uint8_t curr_essiv_iv[16] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 16);
  DMA_RD_XFR_AGAIN:
                         cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC,
@@ -1076,7 +1095,7 @@ int _main(uint32_t task_id)
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
                         uint8_t curr_essiv_iv[8] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 8);
  DMA_RD_XFR_AGAIN:
                         cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC,

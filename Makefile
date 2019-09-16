@@ -29,6 +29,7 @@ APP_BUILD_DIR = $(BUILD_DIR)/apps/$(DIR_NAME)
 
 # SDK Cflags
 CFLAGS := $(APPS_CFLAGS)
+CFLAGS += -I$(PROJ_FILES)/externals/libecc/src $(EXTERNAL_CFLAGS)
 # Application CFLAGS...
 CFLAGS += -Isrc/ -MMD -MP
 
@@ -39,7 +40,7 @@ CFLAGS += -Isrc/ -MMD -MP
 # linker options to add the layout file
 LDFLAGS += -L$(APP_BUILD_DIR) $(EXTRA_LDFLAGS)
 # project's library you whish to use...
-LD_LIBS += -lcryp -laes -lstd
+LD_LIBS += -lcryp -laes -lstd -lsign
 
 ifeq (y,$(CONFIG_STD_DRBG))
 LD_LIBS += -lhmac -lsign
