@@ -122,9 +122,10 @@ static des3_context CBC_ESSIV_ctx;
 #endif
 
 /* This is the global buffer holding the SD card unique serial used for
- * IV derivation
+ * IV derivation/
+ * The CID is on 128 bits as per SDIO standard.
  */
-uint8_t sd_serial[6*sizeof(uint32_t)] = { 0 };
+uint8_t sd_serial[4*sizeof(uint32_t)] = { 0 };
 
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
@@ -689,13 +690,15 @@ int _main(uint32_t task_id)
 
 
                     /* now that SDIO has returned,... */
-                    /* 1) update our sd_serial global buffer using the card serial id */
+                    /* 1) update our sd_serial global buffer using the card serial id (CID of the card on 128 bits) */
                     /* 2) return usefull infos to USB (without serial and
                      * any potential other leak) */
-                    if(sizeof(sd_serial) < (6*sizeof(uint32_t))){
+                    if(sizeof(sd_serial) < (4*sizeof(uint32_t))){
+                        /* CID is on 128 bits per SD standard */
                         goto err;
 		    }
-		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 6*sizeof(uint32_t));
+		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 4*sizeof(uint32_t));
+                    /* Now zeroize the IPC structure to avoid info leak to USB task */
                     memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
