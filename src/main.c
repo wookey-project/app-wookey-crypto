@@ -244,28 +244,45 @@ int _main(uint32_t task_id)
     dev2.gpio_num = 0;
 
     printf("registering %s driver\n", dev2.name);
-    ret = sys_init(INIT_DEVACCESS, &dev2, &dev_descriptor);
-    printf("sys_init returns %s !\n", strerror(ret));
+    if ((ret = sys_init(INIT_DEVACCESS, &dev2, &dev_descriptor)) != SYS_E_DONE) {
+        printf("sys_init returns %s !\n", strerror(ret));
+        goto err_init;
+    }
+
 #endif
 
-    ret = sys_init(INIT_GETTASKID, "smart", &id_smart);
+    if ((ret = sys_init(INIT_GETTASKID, "smart", &id_smart)) != SYS_E_DONE) {
+        printf("sys_init returns %s !\n", strerror(ret));
+        goto err_init;
+    }
     printf("smart is task %x !\n", id_smart);
 
-    ret = sys_init(INIT_GETTASKID, "sdio", &id_sdio);
+    if ((ret = sys_init(INIT_GETTASKID, "sdio", &id_sdio)) != SYS_E_DONE) {
+        printf("sys_init returns %s !\n", strerror(ret));
+        goto err_init;
+    }
     printf("sdio is task %x !\n", id_sdio);
 
-    ret = sys_init(INIT_GETTASKID, "usb", &id_usb);
+    if ((ret = sys_init(INIT_GETTASKID, "usb", &id_usb)) != SYS_E_DONE) {
+        printf("sys_init returns %s !\n", strerror(ret));
+        goto err_init;
+    }
     printf("usb is task %x !\n", id_usb);
 
-    ret = sys_init(INIT_GETTASKID, "pin", &id_pin);
+    if ((ret = sys_init(INIT_GETTASKID, "pin", &id_pin)) != SYS_E_DONE) {
+        printf("sys_init returns %s !\n", strerror(ret));
+        goto err_init;
+    }
     printf("pin is task %x !\n", id_pin);
 
     cryp_early_init(true, CRYP_MAP_AUTO, CRYP_USER, (int *) &dma_in_desc,
                     (int *) &dma_out_desc);
 
     printf("set init as done\n");
-    ret = sys_init(INIT_DONE);
-    printf("sys_init returns %s !\n", strerror(ret));
+    if ((ret = sys_init(INIT_DONE)) != SYS_E_DONE) {
+        printf("sys_init returns %s !\n", strerror(ret));
+        goto err_init;
+    }
 
     /*******************************************
      * let's synchronize with other tasks
@@ -278,9 +295,12 @@ int _main(uint32_t task_id)
          * (usb, sdio & smart), in any order
          */
         id = ANY_APP;
-        do {
-            ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char *) &ipc_sync_cmd);
-        } while (ret != SYS_E_DONE);
+        ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char *) &ipc_sync_cmd);
+        if (ret != SYS_E_DONE) {
+            /* defensive programing, should not append as there is no
+             * asynchronous IPC in this task */
+            continue;
+        }
         if (ipc_sync_cmd.magic == MAGIC_TASK_STATE_CMD
             && ipc_sync_cmd.state == SYNC_READY) {
             printf("task %x has finished its init phase, acknowledge...\n", id);
@@ -293,7 +313,7 @@ int _main(uint32_t task_id)
         ret = sys_ipc(IPC_SEND_SYNC, id, size, (char *) &ipc_sync_cmd);
         if (ret != SYS_E_DONE) {
             printf("sys_ipc(IPC_SEND_SYNC, %d) failed! Exiting...\n", id);
-            return 1;
+            goto err;
         }
 
         if (id == id_smart) {
@@ -321,7 +341,7 @@ int _main(uint32_t task_id)
      *******************************************/
 
 
-    /* Then Syncrhonize with crypto */
+    /* Then Syncrhonize with smart */
     size = sizeof(struct sync_command);
 
     printf("sending end_of_init synchronization to smart\n");
@@ -331,7 +351,7 @@ int _main(uint32_t task_id)
     ret = sys_ipc(IPC_SEND_SYNC, id_smart, size, (char *) &ipc_sync_cmd);
     if (ret != SYS_E_DONE) {
         printf("sys_ipc(IPC_SEND_SYNC, id_smart) failed! Exiting...\n");
-        return 1;
+        goto err;
     }
 
     id = id_smart;
@@ -340,7 +360,7 @@ int _main(uint32_t task_id)
     ret = sys_ipc(IPC_RECV_SYNC, &id, &size, (char *) &ipc_sync_cmd_data);
     if (ret != SYS_E_DONE) {
         printf("sys_ipc(IPC_RECV_SYNC) failed! Exiting...\n");
-        return 1;
+        goto err;
     }
 
     if (ipc_sync_cmd_data.magic == MAGIC_CRYPTO_INJECT_RESP
@@ -362,7 +382,7 @@ int _main(uint32_t task_id)
     /*******************************************
      * Here, the key injection is done. This means that the authentication phase
      * is terminated (this is required for the key injection to be complete).
-     * In order to ensure that dfusmart has not been corrupted and that the user
+     * In order to ensure that smart has not been corrupted and that the user
      * has validated his passphrase, we ask pin to confirm this state.
      *******************************************/
     size = sizeof(struct sync_command);
@@ -405,7 +425,7 @@ int _main(uint32_t task_id)
     ret = sys_ipc(IPC_SEND_SYNC, id_sdio, size, (char *) &ipc_sync_cmd);
     if (ret != SYS_E_DONE) {
         printf("sys_ipc(IPC_SEND_SYNC, id_sdio) failed! Exiting...\n");
-        return 1;
+        goto err;
     }
 
     printf("sending end_of_cryp to sdio done.\n");
@@ -419,7 +439,7 @@ int _main(uint32_t task_id)
     ret = sys_ipc(IPC_SEND_SYNC, id_usb, size, (char *) &ipc_sync_cmd);
     if (ret != SYS_E_DONE) {
         printf("sys_ipc(IPC_SEND_SYNC, id_sdio) failed! Exiting...\n");
-        return 1;
+        goto err;
     }
 
     printf("sending end_of_cryp to usb done.\n");
@@ -459,7 +479,7 @@ int _main(uint32_t task_id)
             }
         }
         else{
-            return 1;
+            goto err;
         }
     }
 
@@ -507,17 +527,23 @@ int _main(uint32_t task_id)
             }
         }
         else{
-            return 1;
+            goto err;
         }
     }
     /* now that both tasks have sent their SHM, we can acknowledge both of them,
      * starting with SDIO (the backend) and finishing with USB (the frontend) */
     ipc_sync_cmd.magic = MAGIC_DMA_SHM_INFO_RESP;
     ipc_sync_cmd.state = SYNC_ACKNOWLEDGE;
-    sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command),
-            (char *) &ipc_sync_cmd);
-    sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command),
-            (char *) &ipc_sync_cmd);
+    if ((ret = sys_ipc(IPC_SEND_SYNC, id_sdio, sizeof(struct sync_command),
+            (char *) &ipc_sync_cmd)) != SYS_E_DONE) {
+        printf("unable to acknowledge SDIO\n");
+        goto err;
+    }
+    if ((ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command),
+            (char *) &ipc_sync_cmd)) != SYS_E_DONE) {
+        printf("unable to acknowledge USB\n");
+        goto err;
+    }
 
 
     /*******************************************
@@ -742,6 +768,7 @@ int _main(uint32_t task_id)
                     if (tmp > 0xffffffff) {
                         printf
                             ("PANIC! scsi num sectors calculation generated overflow !!!\n");
+                        goto err;
                     }
                     sdio_dataplane_command_rw.num_sectors = (uint32_t) tmp;
 
@@ -749,10 +776,10 @@ int _main(uint32_t task_id)
                     tmp *= scsi_block_size;
                     tmp /= sdio_block_size;
 
-                    // FIXME:
                     if (tmp > 0xffffffff) {
                         printf
                             ("PANIC! scsi sector adress calculation generated overflow !!!\n");
+                        goto err;
                     }
                     sdio_dataplane_command_rw.sector_address = (uint32_t) tmp;
 
@@ -777,7 +804,8 @@ int _main(uint32_t task_id)
                                     (char *) &ipc_sync_cmd_data);
                         if (ret != SYS_E_DONE) {
                             printf("%s: unable to send ipc to smart! ret=%d\n",
-                                   __func__, ret);
+                                    __func__, ret);
+                            goto err;
                         }
 
                         sys_ipc(IPC_RECV_SYNC, &id, &size,
@@ -786,6 +814,7 @@ int _main(uint32_t task_id)
                             printf
                                 ("%s: unable to receive ipc from smart! ret=%d\n",
                                  __func__, ret);
+                            goto err;
                         }
 #if CRYPTO_DEBUG
                         printf("===> Key reinjection done!\n");
@@ -871,7 +900,8 @@ int _main(uint32_t task_id)
 
                     if (ret != SYS_E_DONE) {
                         printf("%s: unable to send ipc from sdio! ret=%d\n",
-                               __func__, ret);
+                                __func__, ret);
+                        goto err;
                     }
                     // wait for SDIO task acknowledge (IPC)
                     sinker = id_sdio;
@@ -883,7 +913,8 @@ int _main(uint32_t task_id)
 
                     if (ret != SYS_E_DONE) {
                         printf("%s: unable to receive ipc from sdio! ret=%d\n",
-                               __func__, ret);
+                                __func__, ret);
+                        goto err;
                     }
 #if CRYPTO_DEBUG
                     printf("[write] received ipc from sdio (%d)\n", sinker);
@@ -899,6 +930,7 @@ int _main(uint32_t task_id)
                     if (ret != SYS_E_DONE) {
                         printf("%s: unable to send ipc back to usb! ret=%d\n",
                                __func__, ret);
+                        goto err;
                     }
 
                     break;
@@ -913,7 +945,7 @@ int _main(uint32_t task_id)
                     if (sinker != id_usb) {
                         printf
                             ("data rd DMA request command only allowed from USB app\n");
-                        continue;
+                        goto err;
                     }
                     dataplane_command_rw = ipc_mainloop_cmd.dataplane_cmd;
 
@@ -934,6 +966,7 @@ int _main(uint32_t task_id)
                     if (tmp > 0xffffffff) {
                         printf
                             ("PANIC! scsi num sectors calculation generated overflow !!!\n");
+                        goto err;
                     }
                     sdio_dataplane_command_rw.num_sectors = (uint32_t) tmp;
 
@@ -943,6 +976,7 @@ int _main(uint32_t task_id)
                     if (tmp > 0xffffffff) {
                         printf
                             ("PANIC! scsi sector adress calculation generated overflow !!!\n");
+                        goto err;
                     }
                     sdio_dataplane_command_rw.sector_address = (uint32_t) tmp;
 
@@ -954,6 +988,7 @@ int _main(uint32_t task_id)
                     if (ret != SYS_E_DONE) {
                         printf("%s: unable to send ipc to sdio! ret=%d\n",
                                __func__, ret);
+                        goto err;
                     }
                     // wait for SDIO task acknowledge (IPC)
                     sinker = id_sdio;
@@ -966,6 +1001,7 @@ int _main(uint32_t task_id)
                     if (ret != SYS_E_DONE) {
                         printf("%s: unable to receive ipc from sdio! ret=%d\n",
                                __func__, ret);
+                        goto err;
                     }
 #if CRYPTO_DEBUG
                     printf("[read] received ipc from sdio (%d): data loaded\n",
@@ -1064,6 +1100,7 @@ int _main(uint32_t task_id)
                     if (ret != SYS_E_DONE) {
                         printf("%s: unable to send ipc to usb! ret=%d\n",
                                __func__, ret);
+                        goto err;
                     }
                     break;
 
@@ -1134,8 +1171,14 @@ int _main(uint32_t task_id)
 
     }
 
- err:
+err_init:
     while (1) {
         sys_yield();
     }
+err:
+    /* to be replaced by reset request IPC */
+    while (1) {
+        sys_yield();
+    }
+
 }
