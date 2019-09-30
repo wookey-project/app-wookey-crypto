@@ -1147,14 +1147,13 @@ int _main(uint32_t task_id)
                 /* Reboot request */
             case MAGIC_REBOOT_REQUEST:
                 {
-                    if (sinker == id_usb) {
-                        ret =
-                            sys_ipc(IPC_SEND_SYNC, id_smart,
-                                    sizeof(t_ipc_command),
-                                    (const char *) &ipc_mainloop_cmd);
-                        if(ret != SYS_E_DONE) {
-                           goto err;
-                        }
+                    /* anyone can requst reboot event on error */
+                    ret =
+                        sys_ipc(IPC_SEND_SYNC, id_smart,
+                                sizeof(t_ipc_command),
+                                (const char *) &ipc_mainloop_cmd);
+                    if(ret != SYS_E_DONE) {
+                        goto err;
                     }
                     break;
                 }
