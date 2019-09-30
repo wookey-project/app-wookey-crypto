@@ -199,6 +199,24 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
 }
 
 
+/* Ask the dfusmart task to reboot through IPC */
+static void ask_reboot(void){
+        struct sync_command_data sync_command;
+        sync_command.magic = MAGIC_REBOOT_REQUEST;
+        sync_command.state = SYNC_WAIT;
+        sys_ipc(IPC_SEND_SYNC, id_smart,
+                    sizeof(struct sync_command),
+                    (char*)&sync_command);
+	/* We should not end up here in case of reset ...
+	 * But this can happen when dfusmart refuses to perform
+	 * the reset: in this case, we yield.
+	 */
+        while (1) {
+        	sys_yield();
+        }
+}
+
+
 
 /*
  * We use the local -fno-stack-protector flag for main because
@@ -1177,6 +1195,7 @@ err_init:
     }
 err:
     /* to be replaced by reset request IPC */
+    ask_reboot();
     while (1) {
         sys_yield();
     }
