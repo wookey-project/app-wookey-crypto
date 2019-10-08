@@ -126,7 +126,25 @@ static des3_context CBC_ESSIV_ctx;
  * The CID is on 128 bits as per SDIO standard.
  */
 uint8_t sd_serial[4*sizeof(uint32_t)] = { 0 };
+/*
+*   unlocking password diversification
+*/
 
+static int unlocking_passwd_derivation(uint8_t pwd[16], 
+          const uint8_t * restrict sd_serial, unsigned int sd_serial_len, 
+          const uint8_t * restrict passwd, unsigned int passwd_len)
+{
+    uint8_t passwd_digest[SHA256_DIGEST_SIZE];
+    sha256_context sha256_ctx;
+
+    sha256_init(&sha256_ctx);
+    sha256_update(&sha256_ctx, sd_serial, sd_serial_len);
+    sha256_update(&sha256_ctx, passwd, paswd_len);
+    sha256_final(&sha256_ctx, passwd_digest);
+    
+      memcpy(passwd_digest,pwd,16);
+      
+}
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
  * The diversification varies depending on the underlying block cipher.
@@ -608,6 +626,7 @@ int _main(uint32_t task_id)
         printf("unable to acknowledge SDIO\n");
         goto err;
     }
+    
     if ((ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command),
             (char *) &ipc_sync_cmd)) != SYS_E_DONE) {
         printf("unable to acknowledge USB\n");
@@ -726,8 +745,79 @@ int _main(uint32_t task_id)
                         goto err;
 		    }
 		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 4*sizeof(uint32_t));
+
+                  /* Now unlock the SDCard */
+
+                  /* contact smart for the password */
+                        ipc_sync_cmd_data.magic = MAGIC_STORAGE_PASSWD;
+                        ipc_sync_cmd_data.data_size = (uint8_t) 0;
+
+                        ret =
+                            sys_ipc(IPC_SEND_SYNC, id_smart,
+                                    sizeof(struct sync_command),
+                                    (char *) &ipc_sync_cmd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf("%s: unable to send ipc to smart! ret=%d\n",
+                                    __func__, ret);
+                            goto err;
+                        }
+
+                        id = id_smart;
+                        size = sizeof(struct sync_command_data);
+                        sys_ipc(IPC_RECV_SYNC, &id, &size,
+                                (char *) &ipc_sync_cmd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf
+                                ("%s: unable to receive ipc from smart! ret=%d\n",
+                                 __func__, ret);
+                            goto err;
+                        }
+                        //sanity checks 
+                        if(size>16) {
+                              printf("Damned wrong unlocking data\n");
+                              goto err;
+                        }
+                  /* Derive the SDIO passwd from the cleartext sent */
+                        {
+                           uint8_t pwd[16];
+                           unlocking_passwd_derivation(pwd, sd_serial,16, 
+                                            ipc_sync_cmd_data.data.u8+4,
+                                            ipc_sync_cmd_data.data.u32[0]);
+                          memcpy(pwd,ipc_sync_cmd_data.data.u8+4,16);
+                          ipc_sync_data.data.u32[0]=16;
+                          memset(pwd,0,16);//cleanup 
+                        }
+                  /*  give SDIO the computed password*/
+
+                        //For the time being resquest is just forwarded to SDIO
+                        id = id_sdio;
+                        size = sizeof(struct sync_command_data);
+                        ipc_sync_cmd_data.magic=MAGIC_STORAGE_PASSWD;
+                          
+                        ret = sys_ipc(IPC_SEND_SYNC, &id, &size,
+                            (char *) &ipc_sync_cmd_data);
+                        if(ret != SYS_E_DONE) {
+                          goto err;
+                        }
+                        //Wait for SDIO to ack the unlocking
+  
+                        id = id_sdio;
+                        size = sizeof(struct sync_command_data);
+                        sys_ipc(IPC_RECV_SYNC, &id, &size,
+                                (char *) &ipc_sync_cmd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf
+                                ("%s: unable to receive ipc from sdio! ret=%d\n",
+                                 __func__, ret);
+                            goto err;
+                        }
+                        //Check values returned here to confirm unlocking 
+                      
+
+
                     /* Now zeroize the IPC structure to avoid info leak to USB task */
                     memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+                    
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -737,6 +827,7 @@ int _main(uint32_t task_id)
                     break;
                 }
 
+                  
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
                     /***************************************************
@@ -759,7 +850,7 @@ int _main(uint32_t task_id)
                        goto err;
                     }
 
-                    id = id_sdio;
+                    id = id_smart;
                     size = sizeof(struct sync_command_data);
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_get_block_size);
