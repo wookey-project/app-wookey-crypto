@@ -130,7 +130,7 @@ uint8_t sd_serial[4*sizeof(uint32_t)] = { 0 };
 *   unlocking password diversification
 */
 
-static int unlocking_passwd_derivation(uint8_t pwd[16], 
+static int unlocking_passwd_derivation(uint8_t *pwd, 
           const uint8_t * restrict sd_serial, unsigned int sd_serial_len, 
           const uint8_t * restrict passwd, unsigned int passwd_len)
 {
@@ -139,11 +139,11 @@ static int unlocking_passwd_derivation(uint8_t pwd[16],
 
     sha256_init(&sha256_ctx);
     sha256_update(&sha256_ctx, sd_serial, sd_serial_len);
-    sha256_update(&sha256_ctx, passwd, paswd_len);
+    sha256_update(&sha256_ctx, passwd, passwd_len);
     sha256_final(&sha256_ctx, passwd_digest);
     
-      memcpy(passwd_digest,pwd,16);
-      
+    memcpy(pwd,passwd_digest,16);
+    return 0; 
 }
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
@@ -685,20 +685,23 @@ int _main(uint32_t task_id)
         sinker = ANY_APP;
         ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
-
+        printf("Wait for IPC\n");
         ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char *) &ipc_mainloop_cmd);
         if(ret != SYS_E_DONE) {
             goto err;
         }
+        printf("Received IPC!\n");
 
         switch (ipc_mainloop_cmd.magic) {
 
 
             case MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD:
                 {
+                    struct sync_command_data ipc_sync_passwd_data;
                     /***************************************************
                      * SDIO/USB block size synchronization
                      **************************************************/
+                    printf("block size\n");
                     if (sinker != id_usb) {
                         printf
                             ("block size request command only allowed from USB app\n");
@@ -749,13 +752,13 @@ int _main(uint32_t task_id)
                   /* Now unlock the SDCard */
 
                   /* contact smart for the password */
-                        ipc_sync_cmd_data.magic = MAGIC_STORAGE_PASSWD;
-                        ipc_sync_cmd_data.data_size = (uint8_t) 0;
+                        ipc_sync_passwd_data.magic = MAGIC_STORAGE_PASSWD;
+                        ipc_sync_passwd_data.data_size = (uint8_t) 0;
 
                         ret =
                             sys_ipc(IPC_SEND_SYNC, id_smart,
                                     sizeof(struct sync_command),
-                                    (char *) &ipc_sync_cmd_data);
+                                    (char *) &ipc_sync_passwd_data);
                         if (ret != SYS_E_DONE) {
                             printf("%s: unable to send ipc to smart! ret=%d\n",
                                     __func__, ret);
@@ -765,7 +768,7 @@ int _main(uint32_t task_id)
                         id = id_smart;
                         size = sizeof(struct sync_command_data);
                         sys_ipc(IPC_RECV_SYNC, &id, &size,
-                                (char *) &ipc_sync_cmd_data);
+                                (char *) &ipc_sync_passwd_data);
                         if (ret != SYS_E_DONE) {
                             printf
                                 ("%s: unable to receive ipc from smart! ret=%d\n",
@@ -773,29 +776,40 @@ int _main(uint32_t task_id)
                             goto err;
                         }
                         //sanity checks 
-                        if(size>16) {
-                              printf("Damned wrong unlocking data\n");
+                        if(ipc_sync_passwd_data.data.u32[0] != 16) {
+                              printf("%d size %x Damned wrong unlocking data\n",__LINE__,size);
                               goto err;
                         }
+                        printf("J'ai recu le passwd de smart : \n");
+                        for(unsigned int i=0;i<ipc_sync_passwd_data.data.u32[0];i++)
+                            printf("%x\n",ipc_sync_passwd_data.data.u8[4+i]);
+                        printf("\n");
+#if 1
                   /* Derive the SDIO passwd from the cleartext sent */
                         {
                            uint8_t pwd[16];
                            unlocking_passwd_derivation(pwd, sd_serial,16, 
-                                            ipc_sync_cmd_data.data.u8+4,
-                                            ipc_sync_cmd_data.data.u32[0]);
-                          memcpy(pwd,ipc_sync_cmd_data.data.u8+4,16);
-                          ipc_sync_data.data.u32[0]=16;
+                                            ipc_sync_passwd_data.data.u8+sizeof(uint32_t),
+                                            ipc_sync_passwd_data.data.u32[0]);
+                          memcpy(ipc_sync_passwd_data.data.u8+4,pwd,16);
+                          ipc_sync_passwd_data.data.u32[0]=16;
                           memset(pwd,0,16);//cleanup 
                         }
-                  /*  give SDIO the computed password*/
+#endif    
+              /*  give SDIO the computed password*/
 
-                        //For the time being resquest is just forwarded to SDIO
+                        printf("J'envoi le passwd à SDIO  : \n");
+                        for(unsigned int i=0;i<ipc_sync_passwd_data.data.u32[0];i++)
+                            printf("%x\n",ipc_sync_passwd_data.data.u8[4+i]);
+                        printf("\n");
+
+
                         id = id_sdio;
                         size = sizeof(struct sync_command_data);
-                        ipc_sync_cmd_data.magic=MAGIC_STORAGE_PASSWD;
+                        ipc_sync_passwd_data.magic=MAGIC_STORAGE_PASSWD;
                           
-                        ret = sys_ipc(IPC_SEND_SYNC, &id, &size,
-                            (char *) &ipc_sync_cmd_data);
+                        ret = sys_ipc(IPC_SEND_SYNC, id, size,
+                            (char *) &ipc_sync_passwd_data);
                         if(ret != SYS_E_DONE) {
                           goto err;
                         }
@@ -804,7 +818,7 @@ int _main(uint32_t task_id)
                         id = id_sdio;
                         size = sizeof(struct sync_command_data);
                         sys_ipc(IPC_RECV_SYNC, &id, &size,
-                                (char *) &ipc_sync_cmd_data);
+                                (char *) &ipc_sync_passwd_data);
                         if (ret != SYS_E_DONE) {
                             printf
                                 ("%s: unable to receive ipc from sdio! ret=%d\n",
@@ -812,11 +826,11 @@ int _main(uint32_t task_id)
                             goto err;
                         }
                         //Check values returned here to confirm unlocking 
-                      
+                     /*FIXME*/ 
 
 
                     /* Now zeroize the IPC structure to avoid info leak to USB task */
-                    memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+                    memset(&(ipc_sync_passwd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
                     
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
@@ -830,6 +844,7 @@ int _main(uint32_t task_id)
                   
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
+                    printf("block num\n");
                     /***************************************************
                      * SDIO/USB block number synchronization
                      **************************************************/
@@ -849,8 +864,8 @@ int _main(uint32_t task_id)
                     if(ret != SYS_E_DONE) {
                        goto err;
                     }
-
-                    id = id_smart;
+                    printf("ICI %d\n",__LINE__);
+                    id = id_sdio;
                     size = sizeof(struct sync_command_data);
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_get_block_size);
@@ -879,6 +894,7 @@ int _main(uint32_t task_id)
 
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
+                    printf("ICI %d\n",__LINE__);
 
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_cmd_data);
@@ -887,6 +903,8 @@ int _main(uint32_t task_id)
                     }
 
                     /* for PIN, we give SCSI block size to get the correct size info */
+            
+                    printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_smart,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -902,6 +920,7 @@ int _main(uint32_t task_id)
 
                     /* now that SDIO has returned, let's return to USB */
                     memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+                    printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -909,11 +928,13 @@ int _main(uint32_t task_id)
                        goto err;
                     }
 
+                    printf("ICI %d\n",__LINE__);
                     break;
                 }
 
             case MAGIC_DATA_WR_DMA_REQ:
                 {
+                    printf("write\n");
                     /***************************************************
                      * Write mode automaton
                      **************************************************/
