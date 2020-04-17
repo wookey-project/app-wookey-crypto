@@ -41,6 +41,10 @@ LDFLAGS += -L$(APP_BUILD_DIR) $(EXTRA_LDFLAGS)
 # project's library you whish to use...
 LD_LIBS += -lcryp -laes -lstd
 
+ifeq (y,$(CONFIG_STD_DRBG))
+LD_LIBS += -lhmac -lsign
+endif
+
 ifeq (y,$(CONFIG_TDES_CBC_ESSIV))
 LD_LIBS += -ldes
 endif
