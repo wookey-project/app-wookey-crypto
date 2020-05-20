@@ -384,6 +384,11 @@ int _main(uint32_t task_id)
     if (ipc_sync_cmd_data.magic == MAGIC_CRYPTO_INJECT_RESP
         && ipc_sync_cmd_data.state == SYNC_DONE) {
         printf("key injection done from smart. Hash received.\n");
+	/* Check size overflow */
+	if(ipc_sync_cmd_data.data_size > sizeof(CBC_ESSIV_h_key)){
+		printf("Received CBC_ESSIV_h_key size overflow!\n");
+		goto err;
+	}
         memcpy(CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8,
                ipc_sync_cmd_data.data_size);
         CBC_ESSIV_h_key_initialized = true;
