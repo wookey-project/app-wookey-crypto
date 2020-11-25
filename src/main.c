@@ -130,8 +130,8 @@ uint8_t sd_serial[4*sizeof(uint32_t)] = { 0 };
 *   unlocking password diversification
 */
 
-static int unlocking_passwd_derivation(uint8_t *pwd, 
-          const uint8_t * restrict sd_serial, unsigned int sd_serial_len, 
+static int unlocking_passwd_derivation(uint8_t *pwd,
+          const uint8_t * restrict sd_serial, unsigned int sd_serial_len,
           const uint8_t * restrict passwd, unsigned int passwd_len)
 {
     uint8_t passwd_digest[SHA256_DIGEST_SIZE];
@@ -141,9 +141,9 @@ static int unlocking_passwd_derivation(uint8_t *pwd,
     sha256_update(&sha256_ctx, sd_serial, sd_serial_len);
     sha256_update(&sha256_ctx, passwd, passwd_len);
     sha256_final(&sha256_ctx, passwd_digest);
-    
+
     memcpy(pwd,passwd_digest,16);
-    return 0; 
+    return 0;
 }
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
@@ -173,11 +173,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     /*
      * The AES ESSIV IV before encryption is split using the following
      * scheme:
-     *  
+     *
      * <------ 32 bits -----------><-------- 96 bits ----------->
      * [ sector number big endian | 96 bits MSB of SHA-256(CID) ]
      * <----------------------- 128 bits ----------------------->
-     * 
+     *
      * with "sector number big endian" being the sector number encoded
      * on 32 bits big endian, and CID being the SD unique serial number.
      */
@@ -215,11 +215,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     /*
      * The TDES ESSIV IV before encryption is split using the following
      * scheme:
-     *  
+     *
      * <------ 32 bits -----------><-------- 32 bits ----------->
      * [ sector number big endian | 32 bits MSB of SHA-256(CID) ]
      * <----------------------- 64 bits ------------------------>
-     * 
+     *
      * with "sector number big endian" being the sector number encoded
      * on 32 bits big endian, and CID being the SD unique serial number.
      */
@@ -626,7 +626,7 @@ int _main(uint32_t task_id)
         printf("unable to acknowledge SDIO\n");
         goto err;
     }
-    
+
     if ((ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command),
             (char *) &ipc_sync_cmd)) != SYS_E_DONE) {
         printf("unable to acknowledge USB\n");
@@ -775,48 +775,42 @@ int _main(uint32_t task_id)
                                  __func__, ret);
                             goto err;
                         }
-                        //sanity checks 
+                        //sanity checks
                         if(ipc_sync_passwd_data.data.u32[0] != 16) {
                               printf("%d size %x Damned wrong unlocking data\n",__LINE__,size);
                               goto err;
                         }
-#if 0
-                        printf("J'ai recu le passwd de smart : \n");
-                        for(unsigned int i=0;i<ipc_sync_passwd_data.data.u32[0];i++)
-                            printf("%x\n",ipc_sync_passwd_data.data.u8[4+i]);
-                        printf("\n");
+#if CRYPTO_DEBUG
+                        printf("passwd received from smart : \n");
+                        hexdump(&(ipc_sync_passwd_data.data.u8[4]),ipc_sync_passwd_data.data.u32[0]);
 #endif
-#if 1
                   /* Derive the SDIO passwd from the cleartext sent */
                         {
                            uint8_t pwd[16];
-                           unlocking_passwd_derivation(pwd, sd_serial,16, 
+                           unlocking_passwd_derivation(pwd, sd_serial,16,
                                             ipc_sync_passwd_data.data.u8+sizeof(uint32_t),
                                             ipc_sync_passwd_data.data.u32[0]);
                           memcpy(ipc_sync_passwd_data.data.u8+4,pwd,16);
                           ipc_sync_passwd_data.data.u32[0]=16;
-                          memset(pwd,0,16);//cleanup 
+                          memset(pwd,0,16);//cleanup
                         }
-#endif    
               /*  give SDIO the computed password*/
-#if 0
-                        printf("J'envoi le passwd à SDIO  : \n");
-                        for(unsigned int i=0;i<ipc_sync_passwd_data.data.u32[0];i++)
-                            printf("%x\n",ipc_sync_passwd_data.data.u8[4+i]);
-                        printf("\n");
+#if CRYPTO_DEBUG
+                        printf("Sending derivated passwd to SDIO  : \n");
+                        hexdump(&(ipc_sync_passwd_data.data.u8[4]),ipc_sync_passwd_data.data.u32[0]);
 #endif
 
                         id = id_sdio;
                         size = sizeof(struct sync_command_data);
                         ipc_sync_passwd_data.magic=MAGIC_STORAGE_PASSWD;
-                          
+
                         ret = sys_ipc(IPC_SEND_SYNC, id, size,
                             (char *) &ipc_sync_passwd_data);
                         if(ret != SYS_E_DONE) {
                           goto err;
                         }
                         //Wait for SDIO to ack the unlocking
-  
+
                         id = id_sdio;
                         size = sizeof(struct sync_command_data);
                         sys_ipc(IPC_RECV_SYNC, &id, &size,
@@ -827,13 +821,13 @@ int _main(uint32_t task_id)
                                  __func__, ret);
                             goto err;
                         }
-                        //Check values returned here to confirm unlocking 
-                     /*FIXME*/ 
+                        //Check values returned here to confirm unlocking
+                     /*FIXME*/
 
 
                     /* Now zeroize the IPC structure to avoid info leak to USB task */
                     memset(&(ipc_sync_passwd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
-                    
+
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -843,7 +837,7 @@ int _main(uint32_t task_id)
                     break;
                 }
 
-                  
+
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
  //                   printf("block num\n");
@@ -905,7 +899,7 @@ int _main(uint32_t task_id)
                     }
 
                     /* for PIN, we give SCSI block size to get the correct size info */
-            
+
         //            printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_smart,
                             sizeof(struct sync_command_data),
