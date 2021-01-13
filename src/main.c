@@ -16,10 +16,11 @@
 //#include "dma_regs.h"
 #include "main.h"
 #include "handlers.h"
-#include "aes.h"
 #include "wookey_ipc.h"
 #include "autoconf.h"
 
+/* Include hash header for CBC-ESSIV IV derivation */
+#include "libsig.h"
 
 /* Include the AES or TDES header (for CBC-ESSIV IV derivation) */
 
@@ -120,11 +121,35 @@ static des3_context CBC_ESSIV_ctx;
 #endif
 #endif
 
+/* This is the global buffer holding the SD card unique serial used for
+ * IV derivation/
+ * The CID is on 128 bits as per SDIO standard.
+ */
+uint8_t sd_serial[4*sizeof(uint32_t)] = { 0 };
+/*
+*   unlocking password diversification
+*/
+
+static int unlocking_passwd_derivation(uint8_t *pwd,
+          const uint8_t * restrict sd_serial, unsigned int sd_serial_len,
+          const uint8_t * restrict passwd, unsigned int passwd_len)
+{
+    uint8_t passwd_digest[SHA256_DIGEST_SIZE];
+    sha256_context sha256_ctx;
+
+    sha256_init(&sha256_ctx);
+    sha256_update(&sha256_ctx, sd_serial, sd_serial_len);
+    sha256_update(&sha256_ctx, passwd, passwd_len);
+    sha256_final(&sha256_ctx, passwd_digest);
+
+    memcpy(pwd,passwd_digest,16);
+    return 0;
+}
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
  * The diversification varies depending on the underlying block cipher.
  */
-static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
+static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_serial, unsigned int sd_unique_serial_len, uint8_t * iv,
                                    unsigned int iv_len)
 {
     /* The key hash is not really a secret, we can safely use an unprotected (and faster) AES/TDES algorithm.
@@ -137,7 +162,25 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     if (CBC_ESSIV_h_key_initialized == false) {
         goto err;
     }
+    /* Handle the SD unique serial derivation for the IV */
+    uint8_t sd_serial_digest[SHA256_DIGEST_SIZE];
+    sha256_context sha256_ctx;
+    sha256_init(&sha256_ctx);
+    sha256_update(&sha256_ctx, sd_unique_serial, sd_unique_serial_len);
+    sha256_final(&sha256_ctx, sd_serial_digest);
+
 #ifdef CONFIG_AES256_CBC_ESSIV
+    /*
+     * The AES ESSIV IV before encryption is split using the following
+     * scheme:
+     *
+     * <------ 32 bits -----------><-------- 96 bits ----------->
+     * [ sector number big endian | 96 bits MSB of SHA-256(CID) ]
+     * <----------------------- 128 bits ----------------------->
+     *
+     * with "sector number big endian" being the sector number encoded
+     * on 32 bits big endian, and CID being the SD unique serial number.
+     */
     uint8_t sector_number_buff[16] = { 0 };
     /* Encode the sector number in big endian 16 bytes */
     uint32_t big_endian_sector_number = htonl(sector_number);
@@ -146,6 +189,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     sector_number_buff[1] = (big_endian_sector_number >> 8) & 0xff;
     sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
     sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
+    /* Copy bytes of the SD serial hash.
+     * NOTE: only the 96 bits MSB from the SD serial digest are copied to the
+     * 96 bits LSB of the IV.
+     */
+    memcpy(&(sector_number_buff[4]), sd_serial_digest, sizeof(sector_number_buff)-4);
 
     /* Sanity checks */
     if (iv_len != 16) {
@@ -164,6 +212,17 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     }
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
+    /*
+     * The TDES ESSIV IV before encryption is split using the following
+     * scheme:
+     *
+     * <------ 32 bits -----------><-------- 32 bits ----------->
+     * [ sector number big endian | 32 bits MSB of SHA-256(CID) ]
+     * <----------------------- 64 bits ------------------------>
+     *
+     * with "sector number big endian" being the sector number encoded
+     * on 32 bits big endian, and CID being the SD unique serial number.
+     */
     uint8_t sector_number_buff[8] = { 0 };
     /* Encode the sector number in big endian 8 bytes */
     uint32_t big_endian_sector_number = htonl(sector_number);
@@ -172,6 +231,11 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * iv,
     sector_number_buff[1] = (big_endian_sector_number >> 8) & 0xff;
     sector_number_buff[2] = (big_endian_sector_number >> 16) & 0xff;
     sector_number_buff[3] = (big_endian_sector_number >> 24) & 0xff;
+    /* Copy bytes of the SD serial hash.
+     * NOTE: only the 32 bits MSB from the SD serial digest are copied to the
+     * 32 bits LSB of the IV.
+     */
+    memcpy(&(sector_number_buff[4]), sd_serial_digest, sizeof(sector_number_buff)-4);
 
     /* Sanity checks */
     if (iv_len != 8) {
@@ -562,6 +626,7 @@ int _main(uint32_t task_id)
         printf("unable to acknowledge SDIO\n");
         goto err;
     }
+
     if ((ret = sys_ipc(IPC_SEND_SYNC, id_usb, sizeof(struct sync_command),
             (char *) &ipc_sync_cmd)) != SYS_E_DONE) {
         printf("unable to acknowledge USB\n");
@@ -620,20 +685,23 @@ int _main(uint32_t task_id)
         sinker = ANY_APP;
         ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
-
+//        printf("Wait for IPC\n");
         ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char *) &ipc_mainloop_cmd);
         if(ret != SYS_E_DONE) {
             goto err;
         }
+//        printf("Received IPC!\n");
 
         switch (ipc_mainloop_cmd.magic) {
 
 
             case MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD:
                 {
+                    struct sync_command_data ipc_sync_passwd_data;
                     /***************************************************
                      * SDIO/USB block size synchronization
                      **************************************************/
+ //                   printf("block size\n");
                     if (sinker != id_usb) {
                         printf
                             ("block size request command only allowed from USB app\n");
@@ -671,19 +739,108 @@ int _main(uint32_t task_id)
                     ipc_sync_cmd_data.data.u32[0] = scsi_block_size;
 
 
-                    /* now that SDIO has returned, let's return to USB */
+                    /* now that SDIO has returned,... */
+                    /* 1) update our sd_serial global buffer using the card serial id (CID of the card on 128 bits) */
+                    /* 2) return usefull infos to USB (without serial and
+                     * any potential other leak) */
+                    if(sizeof(sd_serial) < (4*sizeof(uint32_t))){
+                        /* CID is on 128 bits per SD standard */
+                        goto err;
+		    }
+		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 4*sizeof(uint32_t));
+
+                  /* Now unlock the SDCard */
+
+                  /* contact smart for the password */
+                        ipc_sync_passwd_data.magic = MAGIC_STORAGE_PASSWD;
+                        ipc_sync_passwd_data.data_size = (uint8_t) 0;
+
+                        ret =
+                            sys_ipc(IPC_SEND_SYNC, id_smart,
+                                    sizeof(struct sync_command),
+                                    (char *) &ipc_sync_passwd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf("%s: unable to send ipc to smart! ret=%d\n",
+                                    __func__, ret);
+                            goto err;
+                        }
+
+                        id = id_smart;
+                        size = sizeof(struct sync_command_data);
+                        sys_ipc(IPC_RECV_SYNC, &id, &size,
+                                (char *) &ipc_sync_passwd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf
+                                ("%s: unable to receive ipc from smart! ret=%d\n",
+                                 __func__, ret);
+                            goto err;
+                        }
+                        //sanity checks
+                        if(ipc_sync_passwd_data.data.u32[0] != 16) {
+                              printf("%d size %x Damned wrong unlocking data\n",__LINE__,size);
+                              goto err;
+                        }
+#if CRYPTO_DEBUG
+                        printf("passwd received from smart : \n");
+                        hexdump(&(ipc_sync_passwd_data.data.u8[4]),ipc_sync_passwd_data.data.u32[0]);
+#endif
+                  /* Derive the SDIO passwd from the cleartext sent */
+                        {
+                           uint8_t pwd[16];
+                           unlocking_passwd_derivation(pwd, sd_serial,16,
+                                            ipc_sync_passwd_data.data.u8+sizeof(uint32_t),
+                                            ipc_sync_passwd_data.data.u32[0]);
+                          memcpy(ipc_sync_passwd_data.data.u8+4,pwd,16);
+                          ipc_sync_passwd_data.data.u32[0]=16;
+                          memset(pwd,0,16);//cleanup
+                        }
+              /*  give SDIO the computed password*/
+#if CRYPTO_DEBUG
+                        printf("Sending derivated passwd to SDIO  : \n");
+                        hexdump(&(ipc_sync_passwd_data.data.u8[4]),ipc_sync_passwd_data.data.u32[0]);
+#endif
+
+                        id = id_sdio;
+                        size = sizeof(struct sync_command_data);
+                        ipc_sync_passwd_data.magic=MAGIC_STORAGE_PASSWD;
+
+                        ret = sys_ipc(IPC_SEND_SYNC, id, size,
+                            (char *) &ipc_sync_passwd_data);
+                        if(ret != SYS_E_DONE) {
+                          goto err;
+                        }
+                        //Wait for SDIO to ack the unlocking
+
+                        id = id_sdio;
+                        size = sizeof(struct sync_command_data);
+                        sys_ipc(IPC_RECV_SYNC, &id, &size,
+                                (char *) &ipc_sync_passwd_data);
+                        if (ret != SYS_E_DONE) {
+                            printf
+                                ("%s: unable to receive ipc from sdio! ret=%d\n",
+                                 __func__, ret);
+                            goto err;
+                        }
+                        //Check values returned here to confirm unlocking
+                     /*FIXME*/
+
+
+                    /* Now zeroize the IPC structure to avoid info leak to USB task */
+                    memset(&(ipc_sync_passwd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
                     if(ret != SYS_E_DONE) {
                        goto err;
                     }
-
                     break;
                 }
 
+
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
+ //                   printf("block num\n");
                     /***************************************************
                      * SDIO/USB block number synchronization
                      **************************************************/
@@ -703,7 +860,7 @@ int _main(uint32_t task_id)
                     if(ret != SYS_E_DONE) {
                        goto err;
                     }
-
+      //              printf("ICI %d\n",__LINE__);
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
@@ -733,6 +890,7 @@ int _main(uint32_t task_id)
 
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
+      //              printf("ICI %d\n",__LINE__);
 
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_cmd_data);
@@ -741,6 +899,8 @@ int _main(uint32_t task_id)
                     }
 
                     /* for PIN, we give SCSI block size to get the correct size info */
+
+        //            printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_smart,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -755,6 +915,8 @@ int _main(uint32_t task_id)
                         ipc_sync_get_block_size.data.u32[0];
 
                     /* now that SDIO has returned, let's return to USB */
+                    memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+          //          printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -762,6 +924,7 @@ int _main(uint32_t task_id)
                        goto err;
                     }
 
+            //        printf("ICI %d\n",__LINE__);
                     break;
                 }
 
@@ -864,7 +1027,7 @@ int _main(uint32_t task_id)
                     for (i = 0; i < num_cryp_blocks; i++) {
 #ifdef CONFIG_AES256_CBC_ESSIV
                         uint8_t curr_essiv_iv[16] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 16);
  DMA_WR_XFR_AGAIN:
                         cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC,
@@ -872,7 +1035,7 @@ int _main(uint32_t task_id)
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
                         uint8_t curr_essiv_iv[8] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 8);
  DMA_WR_XFR_AGAIN:
                         cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC,
@@ -1062,7 +1225,7 @@ int _main(uint32_t task_id)
                     for (i = 0; i < num_cryp_blocks; i++) {
 #ifdef CONFIG_AES256_CBC_ESSIV
                         uint8_t curr_essiv_iv[16] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 16);
  DMA_RD_XFR_AGAIN:
                         cryp_init_user(KEY_256, curr_essiv_iv, 16, AES_CBC,
@@ -1070,7 +1233,7 @@ int _main(uint32_t task_id)
 #else
 #ifdef CONFIG_TDES_CBC_ESSIV
                         uint8_t curr_essiv_iv[8] = { 0 };
-                        cbc_essiv_iv_derivation((scsi_sector_address + i),
+                        cbc_essiv_iv_derivation((scsi_sector_address + i), sd_serial, sizeof(sd_serial),
                                                 curr_essiv_iv, 8);
  DMA_RD_XFR_AGAIN:
                         cryp_init_user(KEY_192, curr_essiv_iv, 8, TDES_CBC,
