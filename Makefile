@@ -39,7 +39,7 @@ CFLAGS += -Isrc/ -MMD -MP
 # linker options to add the layout file
 LDFLAGS += -L$(APP_BUILD_DIR) $(EXTRA_LDFLAGS)
 # project's library you whish to use...
-LD_LIBS += -lcryp -laes -lstd
+LD_LIBS += -laes -lcryp -lstd
 
 ifeq (y,$(CONFIG_STD_DRBG))
 LD_LIBS += -lhmac -lsign
@@ -48,6 +48,8 @@ endif
 ifeq (y,$(CONFIG_TDES_CBC_ESSIV))
 LD_LIBS += -ldes
 endif
+
+LD_LIBS += -Wl,--no-whole-archive
 
 ###################################################################
 # okay let's list our source files and generated files now
@@ -80,7 +82,7 @@ TODEL_DISTCLEAN += $(APP_BUILD_DIR)
 
 ## library dependencies
 LIBDEP := $(BUILD_DIR)/libs/libstd/libstd.a \
-          $(BUILD_DIR)/libs/libstd/libaes.a
+          $(BUILD_DIR)/libs/libaes/libaes.a
 
 ifeq (y,$(CONFIG_TDES_CBC_ESSIV))
 LIBDEP += $(BUILD_DIR)/libs/libdes/libdes.a
