@@ -294,7 +294,6 @@ int _main(uint32_t task_id)
 {
     char   *wellcome_msg = "hello, I'm crypto";
 
-//    char buffer_in[128];
     logsize_t size;
     uint8_t id = 0;
     char    ipc_buf[32] = { 0 };
@@ -667,8 +666,6 @@ int _main(uint32_t task_id)
     };
     uint8_t sinker = 0;
 
-    //logsize_t ipcsize = 0;
-
     // Default mode is encryption
 #ifdef CONFIG_AES256_CBC_ESSIV
     cryp_init_user(KEY_256, NULL, 0, AES_CBC, ENCRYPT);
@@ -685,12 +682,10 @@ int _main(uint32_t task_id)
         sinker = ANY_APP;
         ipcsize = sizeof(ipc_mainloop_cmd);
         // wait for read or write request from USB
-//        printf("Wait for IPC\n");
         ret = sys_ipc(IPC_RECV_SYNC, &sinker, &ipcsize, (char *) &ipc_mainloop_cmd);
         if(ret != SYS_E_DONE) {
             goto err;
         }
-//        printf("Received IPC!\n");
 
         switch (ipc_mainloop_cmd.magic) {
 
@@ -701,7 +696,6 @@ int _main(uint32_t task_id)
                     /***************************************************
                      * SDIO/USB block size synchronization
                      **************************************************/
- //                   printf("block size\n");
                     if (sinker != id_usb) {
                         printf
                             ("block size request command only allowed from USB app\n");
@@ -840,7 +834,6 @@ int _main(uint32_t task_id)
 
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
- //                   printf("block num\n");
                     /***************************************************
                      * SDIO/USB block number synchronization
                      **************************************************/
@@ -860,7 +853,6 @@ int _main(uint32_t task_id)
                     if(ret != SYS_E_DONE) {
                        goto err;
                     }
-      //              printf("ICI %d\n",__LINE__);
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
@@ -890,7 +882,6 @@ int _main(uint32_t task_id)
 
                     id = id_sdio;
                     size = sizeof(struct sync_command_data);
-      //              printf("ICI %d\n",__LINE__);
 
                     ret = sys_ipc(IPC_RECV_SYNC, &id, &size,
                             (char *) &ipc_sync_cmd_data);
@@ -900,7 +891,6 @@ int _main(uint32_t task_id)
 
                     /* for PIN, we give SCSI block size to get the correct size info */
 
-        //            printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_smart,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -916,7 +906,6 @@ int _main(uint32_t task_id)
 
                     /* now that SDIO has returned, let's return to USB */
                     memset(&(ipc_sync_cmd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
-          //          printf("ICI %d\n",__LINE__);
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
                             (char *) &ipc_sync_cmd_data);
@@ -924,7 +913,6 @@ int _main(uint32_t task_id)
                        goto err;
                     }
 
-            //        printf("ICI %d\n",__LINE__);
                     break;
                 }
 
