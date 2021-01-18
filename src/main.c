@@ -709,7 +709,6 @@ int _main(uint32_t task_id)
 
             case MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD:
                 {
-                    struct sync_command_data ipc_sync_passwd_data;
                     /***************************************************
                      * SDIO/USB block size synchronization
                      **************************************************/
@@ -760,7 +759,9 @@ int _main(uint32_t task_id)
 		    }
 		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 4*sizeof(uint32_t));
 
+#if CONFIG_USE_SD_LOCK /* We only use SD lock if it has been asked by the user! */
                   /* Now unlock the SDCard */
+                  struct sync_command_data ipc_sync_passwd_data;
 
                   /* contact smart for the password */
                         ipc_sync_passwd_data.magic = MAGIC_STORAGE_PASSWD;
@@ -841,6 +842,7 @@ int _main(uint32_t task_id)
 
                     /* Now zeroize the IPC structure to avoid info leak to USB task */
                     memset(&(ipc_sync_passwd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+#endif /* CONFIG_USE_SD_LOCK */
 
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
@@ -850,7 +852,6 @@ int _main(uint32_t task_id)
                     }
                     break;
                 }
-
 
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
