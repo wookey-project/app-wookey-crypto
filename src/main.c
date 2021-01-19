@@ -130,20 +130,37 @@ uint8_t sd_serial[4*sizeof(uint32_t)] = { 0 };
 *   unlocking password diversification
 */
 
-static int unlocking_passwd_derivation(uint8_t *pwd,
+static int unlocking_passwd_derivation(uint8_t pwd[16],
           const uint8_t * restrict sd_serial, unsigned int sd_serial_len,
           const uint8_t * restrict passwd, unsigned int passwd_len)
 {
-    uint8_t passwd_digest[SHA256_DIGEST_SIZE];
+    uint8_t passwd_digest[SHA256_DIGEST_SIZE] = { 0 };
     sha256_context sha256_ctx;
+
+    if((pwd == NULL) || (sd_serial == NULL) || (passwd == NULL)){
+        goto err;
+    }
 
     sha256_init(&sha256_ctx);
     sha256_update(&sha256_ctx, sd_serial, sd_serial_len);
     sha256_update(&sha256_ctx, passwd, passwd_len);
     sha256_final(&sha256_ctx, passwd_digest);
 
-    memcpy(pwd,passwd_digest,16);
+    memcpy(pwd, passwd_digest, 16);
+#if CRYPTO_DEBUG
+    printf("==== SD password diversification:\n");
+    printf("SD serial =\n");
+    hexdump(sd_serial, sd_serial_len);
+    printf("SD password =\n");
+    hexdump(passwd, passwd_len);
+    printf("SD derived password=\n");
+    hexdump(pwd, 16);
+#endif
+
     return 0;
+
+err:
+    return -1;
 }
 /* Crypto helper to perform the IV derivation for CBC-ESSIV depending
  * on the block address.
@@ -455,7 +472,7 @@ int _main(uint32_t task_id)
         memcpy(CBC_ESSIV_h_key, &ipc_sync_cmd_data.data.u8,
                ipc_sync_cmd_data.data_size);
         CBC_ESSIV_h_key_initialized = true;
-#if CONFIG_SMARTCARD_DEBUG
+#if CRYPTO_DEBUG
         printf("hash received:\n");
         hexdump(CBC_ESSIV_h_key, 32);
 #endif
@@ -692,7 +709,6 @@ int _main(uint32_t task_id)
 
             case MAGIC_STORAGE_SCSI_BLOCK_SIZE_CMD:
                 {
-                    struct sync_command_data ipc_sync_passwd_data;
                     /***************************************************
                      * SDIO/USB block size synchronization
                      **************************************************/
@@ -743,7 +759,9 @@ int _main(uint32_t task_id)
 		    }
 		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 4*sizeof(uint32_t));
 
+#if CONFIG_USE_SD_LOCK /* We only use SD lock if it has been asked by the user! */
                   /* Now unlock the SDCard */
+                  struct sync_command_data ipc_sync_passwd_data;
 
                   /* contact smart for the password */
                         ipc_sync_passwd_data.magic = MAGIC_STORAGE_PASSWD;
@@ -780,13 +798,16 @@ int _main(uint32_t task_id)
 #endif
                   /* Derive the SDIO passwd from the cleartext sent */
                         {
-                           uint8_t pwd[16];
-                           unlocking_passwd_derivation(pwd, sd_serial,16,
-                                            ipc_sync_passwd_data.data.u8+sizeof(uint32_t),
-                                            ipc_sync_passwd_data.data.u32[0]);
-                          memcpy(ipc_sync_passwd_data.data.u8+4,pwd,16);
-                          ipc_sync_passwd_data.data.u32[0]=16;
-                          memset(pwd,0,16);//cleanup
+                           uint8_t pwd[16] = { 0 };
+                           if(unlocking_passwd_derivation(pwd, sd_serial, 16,
+                                            ipc_sync_passwd_data.data.u8 + sizeof(uint32_t),
+                                            ipc_sync_passwd_data.data.u32[0])){
+                           
+                               goto err;
+                           }
+                          memcpy(ipc_sync_passwd_data.data.u8+4, pwd, 16);
+                          ipc_sync_passwd_data.data.u32[0] = 16;
+                          memset(pwd, 0, 16);//cleanup
                         }
               /*  give SDIO the computed password*/
 #if CRYPTO_DEBUG
@@ -821,6 +842,7 @@ int _main(uint32_t task_id)
 
                     /* Now zeroize the IPC structure to avoid info leak to USB task */
                     memset(&(ipc_sync_passwd_data.data.u32[2]), 0x0, 6*sizeof(uint32_t));
+#endif /* CONFIG_USE_SD_LOCK */
 
                     ret = sys_ipc(IPC_SEND_SYNC, id_usb,
                             sizeof(struct sync_command_data),
@@ -830,7 +852,6 @@ int _main(uint32_t task_id)
                     }
                     break;
                 }
-
 
             case MAGIC_STORAGE_SCSI_BLOCK_NUM_CMD:
                 {
