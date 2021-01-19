@@ -166,6 +166,9 @@ err:
  * on the block address.
  * The diversification varies depending on the underlying block cipher.
  */
+static uint8_t sd_serial_digest[SHA256_DIGEST_SIZE];
+static volatile bool sd_serial_digest_computed = false;
+
 static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_serial, unsigned int sd_unique_serial_len, uint8_t * iv,
                                    unsigned int iv_len)
 {
@@ -179,12 +182,14 @@ static int cbc_essiv_iv_derivation(uint32_t sector_number, uint8_t * sd_unique_s
     if (CBC_ESSIV_h_key_initialized == false) {
         goto err;
     }
-    /* Handle the SD unique serial derivation for the IV */
-    uint8_t sd_serial_digest[SHA256_DIGEST_SIZE];
-    sha256_context sha256_ctx;
-    sha256_init(&sha256_ctx);
-    sha256_update(&sha256_ctx, sd_unique_serial, sd_unique_serial_len);
-    sha256_final(&sha256_ctx, sd_serial_digest);
+    if(sd_serial_digest_computed == false){
+        /* Handle the SD unique serial derivation for the IV */
+        sha256_context sha256_ctx;
+        sha256_init(&sha256_ctx);
+        sha256_update(&sha256_ctx, sd_unique_serial, sd_unique_serial_len);
+        sha256_final(&sha256_ctx, sd_serial_digest);
+        sd_serial_digest_computed = true;
+    }
 
 #ifdef CONFIG_AES256_CBC_ESSIV
     /*
@@ -758,6 +763,8 @@ int _main(uint32_t task_id)
                         goto err;
 		    }
 		    memcpy(sd_serial, &(ipc_sync_cmd_data.data.u32[2]), 4*sizeof(uint32_t));
+                    /* Reset our serial based IV computation */
+                    sd_serial_digest_computed = false;
 
 #if CONFIG_USE_SD_LOCK /* We only use SD lock if it has been asked by the user! */
                   /* Now unlock the SDCard */
